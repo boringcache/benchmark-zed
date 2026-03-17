@@ -391,7 +391,7 @@ jobs:
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Collect BoringCache diagnostics
-        if: always()
+        if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
         env:
           BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
@@ -410,7 +410,7 @@ jobs:
             --cache-label "sccache-cache"
 
       - name: Upload BoringCache diagnostics
-        if: always()
+        if: always() && hashFiles('boringcache-diag-seed/**/*') != ''
         uses: actions/upload-artifact@v6
         with:
           name: boringcache-diag-${{ env.BENCHMARK_ID }}-seed-boringcache
@@ -791,7 +791,7 @@ jobs:
           echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
 
       - name: Collect BoringCache diagnostics
-        if: always()
+        if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
         env:
           BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
@@ -810,7 +810,7 @@ jobs:
             --cache-label "sccache-cache"
 
       - name: Upload BoringCache diagnostics
-        if: always()
+        if: always() && hashFiles(format('boringcache-diag-{0}/**/*', matrix.phase)) != ''
         uses: actions/upload-artifact@v6
         with:
           name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ matrix.phase }}-boringcache
