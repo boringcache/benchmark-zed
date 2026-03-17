@@ -591,7 +591,10 @@ jobs:
           trap cleanup EXIT
 
           run_cold_build() {
-            cargo build --release
+            (
+              cd upstream
+              cargo build --release
+            )
           }
 
           run_cached_build() {
@@ -605,7 +608,10 @@ jobs:
 
             local started_at
             started_at="$(date +%s)"
-            cargo build --release
+            (
+              cd upstream
+              cargo build --release
+            )
             sccache --show-stats || true
             # Stop sccache server so it flushes pending uploads to the proxy
             sccache --stop-server || true
