@@ -290,6 +290,10 @@ jobs:
             export CC="sccache cc"
             export CXX="sccache c++"
             mkdir -p "$SCCACHE_DIR"
+            sccache --stop-server >/dev/null 2>&1 || true
+            sleep 1
+            sccache --start-server >/dev/null
+            sccache --zero-stats >/dev/null 2>&1 || true
 
             local started_at
             started_at="$(date +%s)"
@@ -372,7 +376,7 @@ jobs:
           cache-cargo: true
           cache-target: false
           tools: rust@${{ env.CLI_RUST_VERSION }}
-          sccache: true
+          sccache: false
           sccache-version: 0.14.0
           cargo-tag: ${{ steps.scope.outputs.tag_cargo_registry }}
           cargo-git-tag: ${{ steps.scope.outputs.tag_cargo_git }}
@@ -605,6 +609,10 @@ jobs:
             export CC="sccache cc"
             export CXX="sccache c++"
             mkdir -p "$SCCACHE_DIR"
+            sccache --stop-server >/dev/null 2>&1 || true
+            sleep 1
+            sccache --start-server >/dev/null
+            sccache --zero-stats >/dev/null 2>&1 || true
 
             local started_at
             started_at="$(date +%s)"
@@ -691,7 +699,7 @@ jobs:
           cache-cargo: true
           cache-target: false
           tools: rust@${{ env.CLI_RUST_VERSION }}
-          sccache: true
+          sccache: false
           sccache-version: 0.14.0
           cargo-tag: ${{ steps.scope.outputs.tag_cargo_registry }}
           cargo-git-tag: ${{ steps.scope.outputs.tag_cargo_git }}
