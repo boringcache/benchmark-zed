@@ -1,0 +1,1014 @@
+name: "Zed sccache - BoringCache"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: "Optional boringcache/cli ref to build and use instead of the released CLI"
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - ".github/workflows/zed-sccache-boringcache.yml"
+      - ".github/workflows/zed-sccache-actions-cache.yml"
+      - "README.md"
+      - "scenarios/**"
+      - "scripts/**"
+      - "upstream"
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PROJECT_REPO: zed-industries/zed
+  PROJECT_REF: "ca0fffb927b9bd94b884b7180f3d8779c3583a98"
+  BENCHMARK_ID: zed-sccache
+  BENCHMARK_WORKSPACE: boringcache/benchmarks
+  CLI_RUST_VERSION: "1.93"
+
+jobs:
+  prepare-cli:
+    name: Prepare benchmark CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      use_custom_cli: ${{ steps.resolve.outputs.use_custom_cli }}
+      artifact_name: ${{ steps.resolve.outputs.artifact_name }}
+      cli_source: ${{ steps.metadata.outputs.cli_source }}
+      cli_ref: ${{ steps.metadata.outputs.cli_ref }}
+    steps:
+      - name: Resolve CLI source
+        id: resolve
+        run: |
+          set -euo pipefail
+          requested_ref="${{ github.event.inputs.cli_ref || '' }}"
+          if [[ -n "$requested_ref" ]]; then
+            echo "use_custom_cli=true" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=boringcache-cli-linux-amd64" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_custom_cli=false" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=" >> "$GITHUB_OUTPUT"
+          fi
+          echo "requested_ref=${requested_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout CLI repo
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: boringcache/cli
+          ref: ${{ steps.resolve.outputs.requested_ref }}
+
+      - name: Setup Rust for custom CLI build
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: rust-sccache
+          tools: rust@${{ env.CLI_RUST_VERSION }}
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: .
+          cache-runtime: false
+          cache-cargo: false
+          cache-target: false
+          sccache: false
+
+      - name: Capture resolved CLI ref
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        id: resolved_ref
+        run: |
+          set -euo pipefail
+          echo "cli_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build custom CLI
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        run: cargo build --release --locked
+
+      - name: Upload custom CLI artifact
+        if: steps.resolve.outputs.use_custom_cli == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.resolve.outputs.artifact_name }}
+          path: target/release/boringcache
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Finalize CLI metadata
+        id: metadata
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.resolve.outputs.use_custom_cli }}" == "true" ]]; then
+            echo "cli_source=custom" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=${{ steps.resolved_ref.outputs.cli_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "cli_source=release" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+  seed-cache:
+    name: sccache Seed (BoringCache, cold)
+    needs: prepare-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    outputs:
+      tags_csv: ${{ steps.scope.outputs.tags_csv }}
+      cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
+    steps:
+      - name: Validate BoringCache secrets
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${BORINGCACHE_RESTORE_TOKEN}" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
+          [[ -n "${BORINGCACHE_SAVE_TOKEN}" ]] || { echo "Missing BoringCache save token" >&2; exit 1; }
+
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare base benchmark source tree
+        run: ./scripts/prepare-source.sh base
+
+      - name: Install BoringCache CLI with boringcache/one
+        uses: boringcache/one@v1
+        with:
+          setup: none
+          mode: archive
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-platform: linux-amd64
+          cache-runtime: false
+
+      - name: Download custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-cli.outputs.artifact_name }}
+          path: ${{ runner.temp }}/boringcache-cli-artifact
+
+      - name: Install custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
+
+      - name: Verify BoringCache CLI
+        run: boringcache --version
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+
+      - name: Configure boringcache/one for Rust toolchain
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: rust-sccache
+          tools: rust@${{ env.CLI_RUST_VERSION }}
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ./upstream
+          cache-runtime: false
+          cache-cargo: false
+          cache-target: false
+          sccache: false
+          verbose: true
+
+      - name: Install sccache
+        run: bash ./scripts/install-sccache.sh --version 0.14.0
+
+      - name: Prepare benchmark scope and helpers
+        id: scope
+        run: |
+          set -euo pipefail
+
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          rust_release="$(rustc --version --verbose | awk '/^release:/{print $2}')"
+          rust_minor="$(echo "${rust_release}" | awk -F. '{print $1 "." $2}')"
+          tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          tags_csv="${tag_cargo_registry},${tag_cargo_git},${tag_sccache}"
+
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+          echo "rust_release=${rust_release}" >> "$GITHUB_OUTPUT"
+          echo "rust_minor=${rust_minor}" >> "$GITHUB_OUTPUT"
+          echo "tag_cargo_registry=${tag_cargo_registry}" >> "$GITHUB_OUTPUT"
+          echo "tag_cargo_git=${tag_cargo_git}" >> "$GITHUB_OUTPUT"
+          echo "tag_sccache=${tag_sccache}" >> "$GITHUB_OUTPUT"
+          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-zed-sccache-phase.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          mode="${1:-warm}"
+          phase_label="${BENCHMARK_PHASE_LABEL:-$mode}"
+
+          proxy_port=5000
+          proxy_log="/tmp/boringcache-proxy-${proxy_port}.log"
+          proxy_pid=""
+          proxy_helper="./scripts/boringcache-proxy.sh"
+          timing_file="${BENCHMARK_TIMING_FILE:-}"
+          proxy_ready_seconds=""
+          build_seconds=""
+
+          write_timing() {
+            if [[ -n "$timing_file" ]]; then
+              printf '%s=%s\n' "$1" "$2" >> "$timing_file"
+            fi
+          }
+
+          start_proxy() {
+            export BORINGCACHE_PROXY_METADATA_HINTS="project=zed,phase=${phase_label}"
+            bash "$proxy_helper" start \
+              --workspace "$BENCHMARK_WORKSPACE" \
+              --tag "$BORINGCACHE_TAG_SCCACHE" \
+              --host 127.0.0.1 \
+              --port "$proxy_port" \
+              --no-git \
+              --verbose >/tmp/boringcache-proxy-start.txt
+            proxy_pid="$(grep '^pid=' /tmp/boringcache-proxy-start.txt | cut -d= -f2-)"
+          }
+
+          stop_proxy() {
+            if [[ -n "${proxy_pid:-}" ]]; then
+              bash "$proxy_helper" stop --pid "$proxy_pid" || true
+            else
+              bash "$proxy_helper" stop || true
+            fi
+            proxy_pid=""
+          }
+
+          wait_for_proxy_ready() {
+            local started_at
+            started_at="$(date +%s)"
+            bash "$proxy_helper" wait --port "$proxy_port" --pid "$proxy_pid"
+            proxy_ready_seconds=$(( $(date +%s) - started_at ))
+            write_timing proxy_ready_seconds "$proxy_ready_seconds"
+          }
+
+          cleanup() {
+            stop_proxy
+            echo "=== Proxy log (last 200 lines) ==="
+            tail -n 200 "$proxy_log" 2>/dev/null || true
+            echo "=== End proxy log ==="
+          }
+          trap cleanup EXIT
+
+          run_cold_build() {
+            cargo build --release
+          }
+
+          run_cached_build() {
+            export SCCACHE_DIR="${HOME}/.cache/sccache"
+            export SCCACHE_WEBDAV_ENDPOINT="http://127.0.0.1:${proxy_port}/"
+            export SCCACHE_IDLE_TIMEOUT="0"
+            export RUSTC_WRAPPER="sccache"
+            export CC="sccache cc"
+            export CXX="sccache c++"
+            mkdir -p "$SCCACHE_DIR"
+
+            local started_at
+            started_at="$(date +%s)"
+            cargo build --release
+            sccache --show-stats || true
+            # Stop sccache server so it flushes pending uploads to the proxy
+            sccache --stop-server || true
+            build_seconds=$(( $(date +%s) - started_at ))
+            write_timing build_seconds "$build_seconds"
+          }
+
+          if [[ -n "$timing_file" ]]; then
+            : > "$timing_file"
+          fi
+
+          case "$mode" in
+            cold)
+              run_cold_build
+              ;;
+            seed|warm)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            stale-low)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            stale-mid)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            stale-high)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            *)
+              echo "Unknown mode: $mode" >&2
+              exit 1
+              ;;
+          esac
+          SH
+          chmod +x ./run-zed-sccache-phase.sh
+
+      - name: Configure boringcache/one for Rust archives
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: rust-sccache
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ./upstream
+          cache-tag: ${{ env.BENCHMARK_ID }}
+          cache-cargo: true
+          cache-target: false
+          tools: rust@${{ env.CLI_RUST_VERSION }}
+          sccache: true
+          sccache-version: 0.14.0
+          cargo-tag: ${{ steps.scope.outputs.tag_cargo_registry }}
+          cargo-git-tag: ${{ steps.scope.outputs.tag_cargo_git }}
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+
+      - name: Run cold + seed cache build
+        id: cold_baseline_build
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_TAG_SCCACHE: ${{ steps.scope.outputs.tag_sccache }}
+        run: |
+          set -euo pipefail
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          start="$(date +%s)"
+          ./run-zed-sccache-phase.sh seed
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Collect BoringCache diagnostics
+        if: always()
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ./scripts/collect-boringcache-diagnostics.sh \
+            --output-dir "boringcache-diag-seed" \
+            --workspace "$BENCHMARK_WORKSPACE" \
+            --tags "${{ steps.scope.outputs.tags_csv }}" \
+            --phase "seed" \
+            --cache-tag "${{ steps.scope.outputs.tag_sccache }}" \
+            --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
+            --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
+            --proxy-port "5000" \
+            --proxy-log-path "/tmp/boringcache-proxy-5000.log" \
+            --cache-root "$HOME/.cache/sccache" \
+            --cache-label "sccache-cache"
+
+      - name: Upload BoringCache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-seed-boringcache
+          path: boringcache-diag-seed
+          if-no-files-found: warn
+
+
+  scenario-builds:
+    name: sccache Scenario (${{ matrix.phase }}) (BoringCache)
+    needs: [prepare-cli, seed-cache]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        phase: [warm1, warm2, stale-low, stale-mid, stale-high]
+    steps:
+      - name: Validate BoringCache restore secret
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${BORINGCACHE_RESTORE_TOKEN}" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
+
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout pinned upstream submodule shallowly
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Prepare scenario source tree
+        run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
+
+      - name: Install BoringCache CLI with boringcache/one
+        uses: boringcache/one@v1
+        with:
+          setup: none
+          mode: archive
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-platform: linux-amd64
+          cache-runtime: false
+
+      - name: Download custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-cli.outputs.artifact_name }}
+          path: ${{ runner.temp }}/boringcache-cli-artifact
+
+      - name: Install custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
+
+      - name: Verify BoringCache CLI
+        run: boringcache --version
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+
+      - name: Configure boringcache/one for Rust toolchain
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: rust-sccache
+          tools: rust@${{ env.CLI_RUST_VERSION }}
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ./upstream
+          cache-runtime: false
+          cache-cargo: false
+          cache-target: false
+          sccache: false
+          verbose: true
+
+      - name: Install sccache
+        run: bash ./scripts/install-sccache.sh --version 0.14.0
+
+      - name: Prepare benchmark scope and helpers
+        id: scope
+        run: |
+          set -euo pipefail
+
+          scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          rust_release="$(rustc --version --verbose | awk '/^release:/{print $2}')"
+          rust_minor="$(echo "${rust_release}" | awk -F. '{print $1 "." $2}')"
+          tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          tags_csv="${tag_cargo_registry},${tag_cargo_git},${tag_sccache}"
+
+          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
+          echo "rust_release=${rust_release}" >> "$GITHUB_OUTPUT"
+          echo "rust_minor=${rust_minor}" >> "$GITHUB_OUTPUT"
+          echo "tag_cargo_registry=${tag_cargo_registry}" >> "$GITHUB_OUTPUT"
+          echo "tag_cargo_git=${tag_cargo_git}" >> "$GITHUB_OUTPUT"
+          echo "tag_sccache=${tag_sccache}" >> "$GITHUB_OUTPUT"
+          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+
+          cat > ./run-zed-sccache-phase.sh <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          mode="${1:-warm}"
+          phase_label="${BENCHMARK_PHASE_LABEL:-$mode}"
+
+          proxy_port=5000
+          proxy_log="/tmp/boringcache-proxy-${proxy_port}.log"
+          proxy_pid=""
+          proxy_helper="./scripts/boringcache-proxy.sh"
+          timing_file="${BENCHMARK_TIMING_FILE:-}"
+          proxy_ready_seconds=""
+          build_seconds=""
+
+          write_timing() {
+            if [[ -n "$timing_file" ]]; then
+              printf '%s=%s\n' "$1" "$2" >> "$timing_file"
+            fi
+          }
+
+          start_proxy() {
+            export BORINGCACHE_PROXY_METADATA_HINTS="project=zed,phase=${phase_label}"
+            bash "$proxy_helper" start \
+              --workspace "$BENCHMARK_WORKSPACE" \
+              --tag "$BORINGCACHE_TAG_SCCACHE" \
+              --host 127.0.0.1 \
+              --port "$proxy_port" \
+              --no-git \
+              --verbose >/tmp/boringcache-proxy-start.txt
+            proxy_pid="$(grep '^pid=' /tmp/boringcache-proxy-start.txt | cut -d= -f2-)"
+          }
+
+          stop_proxy() {
+            if [[ -n "${proxy_pid:-}" ]]; then
+              bash "$proxy_helper" stop --pid "$proxy_pid" || true
+            else
+              bash "$proxy_helper" stop || true
+            fi
+            proxy_pid=""
+          }
+
+          wait_for_proxy_ready() {
+            local started_at
+            started_at="$(date +%s)"
+            bash "$proxy_helper" wait --port "$proxy_port" --pid "$proxy_pid"
+            proxy_ready_seconds=$(( $(date +%s) - started_at ))
+            write_timing proxy_ready_seconds "$proxy_ready_seconds"
+          }
+
+          cleanup() {
+            stop_proxy
+            echo "=== Proxy log (last 200 lines) ==="
+            tail -n 200 "$proxy_log" 2>/dev/null || true
+            echo "=== End proxy log ==="
+          }
+          trap cleanup EXIT
+
+          run_cold_build() {
+            cargo build --release
+          }
+
+          run_cached_build() {
+            export SCCACHE_DIR="${HOME}/.cache/sccache"
+            export SCCACHE_WEBDAV_ENDPOINT="http://127.0.0.1:${proxy_port}/"
+            export SCCACHE_IDLE_TIMEOUT="0"
+            export RUSTC_WRAPPER="sccache"
+            export CC="sccache cc"
+            export CXX="sccache c++"
+            mkdir -p "$SCCACHE_DIR"
+
+            local started_at
+            started_at="$(date +%s)"
+            cargo build --release
+            sccache --show-stats || true
+            # Stop sccache server so it flushes pending uploads to the proxy
+            sccache --stop-server || true
+            build_seconds=$(( $(date +%s) - started_at ))
+            write_timing build_seconds "$build_seconds"
+          }
+
+          if [[ -n "$timing_file" ]]; then
+            : > "$timing_file"
+          fi
+
+          case "$mode" in
+            cold)
+              run_cold_build
+              ;;
+            seed|warm)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            stale-low)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            stale-mid)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            stale-high)
+              start_proxy
+              if ! wait_for_proxy_ready; then
+                echo "Registry proxy did not become ready" >&2
+                tail -n 200 "$proxy_log" || true
+                exit 1
+              fi
+              run_cached_build
+              stop_proxy
+              ;;
+            *)
+              echo "Unknown mode: $mode" >&2
+              exit 1
+              ;;
+          esac
+          SH
+          chmod +x ./run-zed-sccache-phase.sh
+
+      - name: Capture archive restore start
+        id: archive_restore_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure boringcache/one for Rust archives
+        uses: boringcache/one@v1
+        with:
+          cli-version: skip
+          setup: mise
+          mode: rust-sccache
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          working-directory: ./upstream
+          cache-tag: ${{ env.BENCHMARK_ID }}
+          cache-cargo: true
+          cache-target: false
+          tools: rust@${{ env.CLI_RUST_VERSION }}
+          sccache: true
+          sccache-version: 0.14.0
+          cargo-tag: ${{ steps.scope.outputs.tag_cargo_registry }}
+          cargo-git-tag: ${{ steps.scope.outputs.tag_cargo_git }}
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+
+      - name: Capture archive restore timing
+        id: archive_restore_timing
+        run: |
+          set -euo pipefail
+          start="${{ steps.archive_restore_start.outputs.started_at }}"
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Run warm build 1
+        id: warm1_build
+        if: matrix.phase == 'warm1'
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_TAG_SCCACHE: ${{ steps.scope.outputs.tag_sccache }}
+        run: |
+          set -euo pipefail
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
+          start="$(date +%s)"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh warm
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+
+      - name: Run warm build 2
+        id: warm2_build
+        if: matrix.phase == 'warm2'
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_TAG_SCCACHE: ${{ steps.scope.outputs.tag_sccache }}
+        run: |
+          set -euo pipefail
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
+          start="$(date +%s)"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh warm
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+
+      - name: Run stale-low build
+        id: stale_low_build
+        if: matrix.phase == 'stale-low'
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_TAG_SCCACHE: ${{ steps.scope.outputs.tag_sccache }}
+        run: |
+          set -euo pipefail
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
+          start="$(date +%s)"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh stale-low
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+
+      - name: Run stale-mid build
+        id: stale_mid_build
+        if: matrix.phase == 'stale-mid'
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_TAG_SCCACHE: ${{ steps.scope.outputs.tag_sccache }}
+        run: |
+          set -euo pipefail
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
+          start="$(date +%s)"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh stale-mid
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+
+      - name: Run stale-high build
+        id: stale_high_build
+        if: matrix.phase == 'stale-high'
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_TAG_SCCACHE: ${{ steps.scope.outputs.tag_sccache }}
+        run: |
+          set -euo pipefail
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
+          start="$(date +%s)"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh stale-high
+          end="$(date +%s)"
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+
+      - name: Collect BoringCache diagnostics
+        if: always()
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ./scripts/collect-boringcache-diagnostics.sh \
+            --output-dir "boringcache-diag-${{ matrix.phase }}" \
+            --workspace "$BENCHMARK_WORKSPACE" \
+            --tags "${{ steps.scope.outputs.tags_csv }}" \
+            --phase "${{ matrix.phase }}" \
+            --cache-tag "${{ steps.scope.outputs.tag_sccache }}" \
+            --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
+            --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
+            --proxy-port "5000" \
+            --proxy-log-path "/tmp/boringcache-proxy-5000.log" \
+            --cache-root "$HOME/.cache/sccache" \
+            --cache-label "sccache-cache"
+
+      - name: Upload BoringCache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ matrix.phase }}-boringcache
+          path: boringcache-diag-${{ matrix.phase }}
+          if-no-files-found: warn
+
+      - name: Capture scenario timing
+        id: phase_timing
+        run: |
+          set -euo pipefail
+          seconds=""
+          restore_seconds=""
+          proxy_ready_seconds=""
+          build_seconds=""
+          case "${{ matrix.phase }}" in
+            warm1)
+              seconds="${{ steps.warm1_build.outputs.seconds }}"
+              restore_seconds="${{ steps.archive_restore_timing.outputs.seconds }}"
+              proxy_ready_seconds="${{ steps.warm1_build.outputs.proxy_ready_seconds }}"
+              build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
+              ;;
+            warm2)
+              seconds="${{ steps.warm2_build.outputs.seconds }}"
+              restore_seconds="${{ steps.archive_restore_timing.outputs.seconds }}"
+              proxy_ready_seconds="${{ steps.warm2_build.outputs.proxy_ready_seconds }}"
+              build_seconds="${{ steps.warm2_build.outputs.build_seconds }}"
+              ;;
+            stale-low)
+              seconds="${{ steps.stale_low_build.outputs.seconds }}"
+              restore_seconds="${{ steps.archive_restore_timing.outputs.seconds }}"
+              proxy_ready_seconds="${{ steps.stale_low_build.outputs.proxy_ready_seconds }}"
+              build_seconds="${{ steps.stale_low_build.outputs.build_seconds }}"
+              ;;
+            stale-mid)
+              seconds="${{ steps.stale_mid_build.outputs.seconds }}"
+              restore_seconds="${{ steps.archive_restore_timing.outputs.seconds }}"
+              proxy_ready_seconds="${{ steps.stale_mid_build.outputs.proxy_ready_seconds }}"
+              build_seconds="${{ steps.stale_mid_build.outputs.build_seconds }}"
+              ;;
+            stale-high)
+              seconds="${{ steps.stale_high_build.outputs.seconds }}"
+              restore_seconds="${{ steps.archive_restore_timing.outputs.seconds }}"
+              proxy_ready_seconds="${{ steps.stale_high_build.outputs.proxy_ready_seconds }}"
+              build_seconds="${{ steps.stale_high_build.outputs.build_seconds }}"
+              ;;
+            *)
+              echo "Unknown phase: ${{ matrix.phase }}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "${seconds}" || -z "${restore_seconds}" || -z "${proxy_ready_seconds}" || -z "${build_seconds}" ]]; then
+            echo "No timing captured for phase ${{ matrix.phase }}" >&2
+            exit 1
+          fi
+          echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          echo "restore_seconds=${restore_seconds}" >> "$GITHUB_OUTPUT"
+          echo "proxy_ready_seconds=${proxy_ready_seconds}" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
+          echo "end_to_end_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+      - name: Persist scenario timing artifact
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-phase
+          cat > "benchmark-phase/${{ matrix.phase }}.env" <<EOF
+          phase=${{ matrix.phase }}
+          seconds=${{ steps.phase_timing.outputs.seconds }}
+          restore_seconds=${{ steps.phase_timing.outputs.restore_seconds }}
+          proxy_ready_seconds=${{ steps.phase_timing.outputs.proxy_ready_seconds }}
+          build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
+          end_to_end_seconds=${{ steps.phase_timing.outputs.end_to_end_seconds }}
+          EOF
+      - name: Upload scenario timing artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-${{ matrix.phase }}
+          path: benchmark-phase/${{ matrix.phase }}.env
+          if-no-files-found: error
+
+  finalize-benchmark:
+    name: Finalize benchmark artifacts
+    needs: [prepare-cli, seed-cache, scenario-builds]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Install BoringCache CLI with boringcache/one
+        uses: boringcache/one@v1
+        with:
+          setup: none
+          mode: archive
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-platform: linux-amd64
+          cache-runtime: false
+
+      - name: Download custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-cli.outputs.artifact_name }}
+          path: ${{ runner.temp }}/boringcache-cli-artifact
+
+      - name: Install custom CLI artifact
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
+
+      - name: Verify BoringCache CLI
+        run: boringcache --version
+
+      - name: Download scenario timing artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-*
+          path: benchmark-phase
+          merge-multiple: true
+      - name: Collect scenario timings
+        id: timings
+        run: |
+          set -euo pipefail
+          parse_phase() {
+            local phase="$1"
+            local key="${phase//-/_}"
+            local file="benchmark-phase/${phase}.env"
+            if [[ ! -f "$file" ]]; then
+              echo "Missing timing artifact for phase ${phase}" >&2
+              ls -R benchmark-phase || true
+              exit 1
+            fi
+            local seconds
+            seconds="$(grep "^seconds=" "$file" | head -n1 | cut -d= -f2-)"
+            if [[ -z "${seconds}" ]]; then
+              echo "Timing artifact for phase ${phase} has empty seconds" >&2
+              cat "$file" >&2
+              exit 1
+            fi
+            echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          }
+          parse_phase warm1
+          parse_phase warm2
+          parse_phase stale-low
+          parse_phase stale-mid
+          parse_phase stale-high
+      - name: Measure BoringCache storage usage
+        id: cache_size
+        env:
+          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
+          bytes="$(./scripts/sum-boringcache-check-sizes.sh "$BENCHMARK_WORKSPACE" "$tags_csv")"
+          echo "bytes=${bytes}" >> "$GITHUB_OUTPUT"
+
+      - name: Write benchmark artifacts
+        id: artifact_files
+        run: |
+          ./scripts/write-benchmark-artifacts.sh \
+            --benchmark "$BENCHMARK_ID" \
+            --strategy "boringcache" \
+            --project-repo "$PROJECT_REPO" \
+            --project-ref "$PROJECT_REF" \
+            --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
+            --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
+            --warm2-seconds "${{ steps.timings.outputs.warm2_seconds }}" \
+            --stale-low-seconds "${{ steps.timings.outputs.stale_low_seconds }}" \
+            --stale-mid-seconds "${{ steps.timings.outputs.stale_mid_seconds }}" \
+            --stale-high-seconds "${{ steps.timings.outputs.stale_high_seconds }}" \
+            --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
+            --cache-storage-source "boringcache-check" \
+            --hit-behavior-note "Cold+seed run builds from empty state with sccache pointed at a boringcache cache-registry WebDAV proxy, then archives only cargo registry/git while recording cold timing. sccache artifacts stay native to the proxy; no target archive is saved or restored. Warm1/Warm2 and stale phases restore run-scoped cargo archives on fresh runners, clear local ~/.cache/sccache, and rebuild against the same proxy-backed sccache namespace. Scenario source changes come from committed benchmark patches: stale-low mutates a leaf crate source file, stale-mid mutates editor/project code, and stale-high mutates shared gpui/settings code."
+
+      - name: Write phase timing breakdown
+        id: phase_breakdown
+        run: |
+          python3 ./scripts/write-phase-timing-breakdown.py \
+            --benchmark "$BENCHMARK_ID" \
+            --strategy "boringcache" \
+            --phase-dir benchmark-phase \
+            --output-dir benchmark-results
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache
+          path: |
+            ${{ steps.artifact_files.outputs.json_path }}
+            ${{ steps.artifact_files.outputs.md_path }}
+            ${{ steps.phase_breakdown.outputs.json_path }}
+            ${{ steps.phase_breakdown.outputs.md_path }}
+          if-no-files-found: error
+
+      - name: Publish summary
+        run: |
+          cat "${{ steps.artifact_files.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "${{ steps.phase_breakdown.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
