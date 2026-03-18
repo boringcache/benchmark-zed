@@ -6,7 +6,7 @@ PID_FILE="/tmp/boringcache-proxy.pid"
 usage() {
   cat <<'EOF' >&2
 Usage:
-  boringcache-proxy.sh start --workspace WORKSPACE --tag TAG --port PORT [--command COMMAND] [--host HOST] [--no-git] [--no-platform] [--verbose]
+  boringcache-proxy.sh start --workspace WORKSPACE --tag TAG --port PORT [--command COMMAND] [--host HOST] [--read-only] [--no-git] [--no-platform] [--verbose]
   boringcache-proxy.sh wait --port PORT [--pid PID] [--timeout-ms 300000]
   boringcache-proxy.sh stop [--pid PID]
 EOF
@@ -29,6 +29,7 @@ pid=""
 no_git=0
 no_platform=0
 verbose=0
+read_only=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,6 +52,10 @@ while [[ $# -gt 0 ]]; do
     --port)
       port="${2:-}"
       shift 2
+      ;;
+    --read-only)
+      read_only=1
+      shift
       ;;
     --timeout-ms)
       timeout_ms="${2:-}"
@@ -113,6 +118,10 @@ start_proxy() {
 
   local -a args
   args=("$proxy_command" "$workspace" "$tag")
+  if [[ "$read_only" -eq 0 && "$proxy_command" == "cache-registry" && -z "${BORINGCACHE_SAVE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}" && -n "${BORINGCACHE_RESTORE_TOKEN:-}" ]]; then
+    read_only=1
+    echo "No save-capable token configured; starting cache-registry in read-only mode with BORINGCACHE_RESTORE_TOKEN"
+  fi
   if [[ "$no_git" -eq 1 ]]; then
     args+=(--no-git)
   fi
@@ -120,6 +129,9 @@ start_proxy() {
     args+=(--no-platform)
   fi
   args+=(--host "$host" --port "$port")
+  if [[ "$read_only" -eq 1 ]]; then
+    args+=(--read-only)
+  fi
   if [[ "$verbose" -eq 1 ]]; then
     args+=(--verbose)
   fi
