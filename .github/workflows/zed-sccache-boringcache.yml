@@ -29,6 +29,8 @@ env:
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   CLI_RUST_VERSION: "1.93"
+  # Internal override for staging/perf experiments. Leave unset to use the default API.
+  BORINGCACHE_API_URL: ${{ vars.BORINGCACHE_API_URL || '' }}
 
 jobs:
   prepare-cli:
