@@ -240,13 +240,20 @@ jobs:
 
           start_proxy() {
             export BORINGCACHE_PROXY_METADATA_HINTS="project=zed,phase=${phase_label}"
-            bash "$proxy_helper" start \
-              --workspace "$BENCHMARK_WORKSPACE" \
-              --tag "$BORINGCACHE_TAG_SCCACHE" \
-              --host 127.0.0.1 \
-              --port "$proxy_port" \
-              --no-git \
-              --verbose >/tmp/boringcache-proxy-start.txt
+            local -a proxy_args
+            proxy_args=(
+              start
+              --workspace "$BENCHMARK_WORKSPACE"
+              --tag "$BORINGCACHE_TAG_SCCACHE"
+              --host 127.0.0.1
+              --port "$proxy_port"
+              --no-git
+              --verbose
+            )
+            if [[ "$mode" != "seed" ]]; then
+              proxy_args+=(--read-only)
+            fi
+            bash "$proxy_helper" "${proxy_args[@]}" >/tmp/boringcache-proxy-start.txt
             proxy_pid="$(grep '^pid=' /tmp/boringcache-proxy-start.txt | cut -d= -f2-)"
           }
 
@@ -559,13 +566,20 @@ jobs:
 
           start_proxy() {
             export BORINGCACHE_PROXY_METADATA_HINTS="project=zed,phase=${phase_label}"
-            bash "$proxy_helper" start \
-              --workspace "$BENCHMARK_WORKSPACE" \
-              --tag "$BORINGCACHE_TAG_SCCACHE" \
-              --host 127.0.0.1 \
-              --port "$proxy_port" \
-              --no-git \
-              --verbose >/tmp/boringcache-proxy-start.txt
+            local -a proxy_args
+            proxy_args=(
+              start
+              --workspace "$BENCHMARK_WORKSPACE"
+              --tag "$BORINGCACHE_TAG_SCCACHE"
+              --host 127.0.0.1
+              --port "$proxy_port"
+              --no-git
+              --verbose
+            )
+            if [[ "$mode" != "seed" ]]; then
+              proxy_args+=(--read-only)
+            fi
+            bash "$proxy_helper" "${proxy_args[@]}" >/tmp/boringcache-proxy-start.txt
             proxy_pid="$(grep '^pid=' /tmp/boringcache-proxy-start.txt | cut -d= -f2-)"
           }
 
