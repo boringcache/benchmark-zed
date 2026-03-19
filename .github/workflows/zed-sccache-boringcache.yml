@@ -28,6 +28,7 @@ env:
   PROJECT_REF: "ca0fffb927b9bd94b884b7180f3d8779c3583a98"
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
+  CLI_RELEASE_VERSION: "1.12.7"
   CLI_RUST_VERSION: "1.93"
   # Internal override for staging/perf experiments. Leave unset to use the default API.
   BORINGCACHE_API_URL: ${{ vars.BORINGCACHE_API_URL || secrets.BORINGCACHE_API_URL || '' }}
@@ -150,6 +151,7 @@ jobs:
           setup: none
           mode: archive
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-version: ${{ env.CLI_RELEASE_VERSION }}
           cli-platform: linux-amd64
           cache-runtime: false
 
@@ -476,6 +478,7 @@ jobs:
           setup: none
           mode: archive
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-version: ${{ env.CLI_RELEASE_VERSION }}
           cli-platform: linux-amd64
           cache-runtime: false
 
@@ -943,6 +946,7 @@ jobs:
           setup: none
           mode: archive
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cli-version: ${{ env.CLI_RELEASE_VERSION }}
           cli-platform: linux-amd64
           cache-runtime: false
 
