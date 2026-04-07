@@ -28,6 +28,7 @@ env:
   PROJECT_REF: "ca0fffb927b9bd94b884b7180f3d8779c3583a98"
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
+  CLI_RELEASE_TAG: "v1.12.17"
   CLI_RUST_VERSION: "1.93"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "16"
   BORINGCACHE_CACHE_URL_BATCH_CONCURRENCY: "8"
@@ -152,14 +153,12 @@ jobs:
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
-      - name: Install BoringCache CLI with boringcache/one
-        uses: boringcache/one@v1
-        with:
-          setup: none
-          mode: archive
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cli-platform: linux-amd64
-          cache-runtime: false
+      - name: Install released BoringCache CLI
+        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --release-tag "${{ env.CLI_RELEASE_TAG }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
@@ -239,6 +238,7 @@ jobs:
           proxy_pid=""
           proxy_helper="./scripts/boringcache-proxy.sh"
           timing_file="${BENCHMARK_TIMING_FILE:-}"
+          stats_file="${BENCHMARK_SCCACHE_STATS_FILE:-}"
           proxy_ready_seconds=""
           build_seconds=""
 
@@ -318,7 +318,11 @@ jobs:
               cd upstream
               cargo build --release
             )
-            sccache --show-stats || true
+            if [[ -n "$stats_file" ]]; then
+              sccache --show-stats | tee "$stats_file" || true
+            else
+              sccache --show-stats || true
+            fi
             # Stop sccache server so it flushes pending uploads to the proxy
             sccache --stop-server || true
             build_seconds=$(( $(date +%s) - started_at ))
@@ -478,14 +482,12 @@ jobs:
       - name: Prepare scenario source tree
         run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
 
-      - name: Install BoringCache CLI with boringcache/one
-        uses: boringcache/one@v1
-        with:
-          setup: none
-          mode: archive
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cli-platform: linux-amd64
-          cache-runtime: false
+      - name: Install released BoringCache CLI
+        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --release-tag "${{ env.CLI_RELEASE_TAG }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
@@ -565,6 +567,7 @@ jobs:
           proxy_pid=""
           proxy_helper="./scripts/boringcache-proxy.sh"
           timing_file="${BENCHMARK_TIMING_FILE:-}"
+          stats_file="${BENCHMARK_SCCACHE_STATS_FILE:-}"
           proxy_ready_seconds=""
           build_seconds=""
 
@@ -644,7 +647,11 @@ jobs:
               cd upstream
               cargo build --release
             )
-            sccache --show-stats || true
+            if [[ -n "$stats_file" ]]; then
+              sccache --show-stats | tee "$stats_file" || true
+            else
+              sccache --show-stats || true
+            fi
             # Stop sccache server so it flushes pending uploads to the proxy
             sccache --stop-server || true
             build_seconds=$(( $(date +%s) - started_at ))
@@ -752,7 +759,8 @@ jobs:
 
           timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
           start="$(date +%s)"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh warm
+          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -771,7 +779,8 @@ jobs:
 
           timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
           start="$(date +%s)"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh warm
+          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -790,7 +799,8 @@ jobs:
 
           timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
           start="$(date +%s)"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh stale-low
+          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh stale-low
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -809,7 +819,8 @@ jobs:
 
           timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
           start="$(date +%s)"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh stale-mid
+          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh stale-mid
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -828,7 +839,8 @@ jobs:
 
           timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
           start="$(date +%s)"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" ./run-zed-sccache-phase.sh stale-high
+          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh stale-high
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -926,11 +938,15 @@ jobs:
           build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
           end_to_end_seconds=${{ steps.phase_timing.outputs.end_to_end_seconds }}
           EOF
+          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          if [[ -f "$stats_file" ]]; then
+            cp "$stats_file" "benchmark-phase/${{ matrix.phase }}-sccache-stats.txt"
+          fi
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
           name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-${{ matrix.phase }}
-          path: benchmark-phase/${{ matrix.phase }}.env
+          path: benchmark-phase/${{ matrix.phase }}*
           if-no-files-found: error
 
   finalize-benchmark:
@@ -945,14 +961,12 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Install BoringCache CLI with boringcache/one
-        uses: boringcache/one@v1
-        with:
-          setup: none
-          mode: archive
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cli-platform: linux-amd64
-          cache-runtime: false
+      - name: Install released BoringCache CLI
+        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
+        run: |
+          set -euo pipefail
+          bash ./scripts/install-benchmark-cli.sh \
+            --release-tag "${{ env.CLI_RELEASE_TAG }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
