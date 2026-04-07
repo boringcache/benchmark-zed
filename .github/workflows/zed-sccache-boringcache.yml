@@ -28,7 +28,7 @@ env:
   PROJECT_REF: "ca0fffb927b9bd94b884b7180f3d8779c3583a98"
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
-  CLI_RELEASE_TAG: "v1.12.17"
+  CLI_RELEASE_TAG: "v1.12.19"
   CLI_RUST_VERSION: "1.93"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "16"
   BORINGCACHE_CACHE_URL_BATCH_CONCURRENCY: "8"
@@ -304,7 +304,11 @@ jobs:
             export SCCACHE_DIR="${HOME}/.cache/sccache"
             export SCCACHE_WEBDAV_ENDPOINT="http://127.0.0.1:${proxy_port}/"
             export SCCACHE_IDLE_TIMEOUT="0"
-            export CARGO_NET_OFFLINE="true"
+            if [[ "$mode" == "seed" ]]; then
+              unset CARGO_NET_OFFLINE
+            else
+              export CARGO_NET_OFFLINE="true"
+            fi
             export RUSTC_WRAPPER="sccache"
             export CC="sccache cc"
             export CXX="sccache c++"
