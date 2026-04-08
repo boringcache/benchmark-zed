@@ -32,7 +32,7 @@ env:
   CLI_RUST_VERSION: "1.93"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "16"
   BORINGCACHE_CACHE_URL_BATCH_CONCURRENCY: "8"
-  BORINGCACHE_CACHE_URL_BATCH_MAX: "4000"
+  BORINGCACHE_CACHE_URL_BATCH_MAX: "2000"
   BORINGCACHE_CACHE_PREFETCH_CONCURRENCY: "8"
   BORINGCACHE_BLOB_READ_CACHE_MAX_BYTES: "4294967296"
   BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: "2048"
@@ -593,6 +593,7 @@ jobs:
               --tag "$BORINGCACHE_TAG_SCCACHE"
               --host 127.0.0.1
               --port "$proxy_port"
+              --no-platform
               --no-git
               --verbose
             )
