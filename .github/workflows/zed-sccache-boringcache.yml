@@ -30,16 +30,6 @@ env:
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   CLI_RELEASE_TAG: "v1.12.19"
   CLI_RUST_VERSION: "1.93"
-  BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: "16"
-  BORINGCACHE_CACHE_URL_BATCH_CONCURRENCY: "8"
-  BORINGCACHE_CACHE_URL_BATCH_MAX: "2000"
-  BORINGCACHE_CACHE_PREFETCH_CONCURRENCY: "8"
-  BORINGCACHE_BLOB_READ_CACHE_MAX_BYTES: "4294967296"
-  BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: "2048"
-  BORINGCACHE_STARTUP_PREFETCH_MAX_TOTAL_BYTES: "536870912"
-  BORINGCACHE_BLOB_PREFETCH_MAX_INFLIGHT_BYTES: "536870912"
-  # Internal override for staging/perf experiments. Leave unset to use the default API.
-  BORINGCACHE_API_URL: ${{ vars.BORINGCACHE_API_URL || secrets.BORINGCACHE_API_URL || '' }}
 
 jobs:
   prepare-cli:
@@ -249,7 +239,6 @@ jobs:
           }
 
           start_proxy() {
-            export BORINGCACHE_PROXY_METADATA_HINTS="project=zed,phase=${phase_label}"
             local -a proxy_args
             proxy_args=(
               start
@@ -585,7 +574,6 @@ jobs:
           }
 
           start_proxy() {
-            export BORINGCACHE_PROXY_METADATA_HINTS="project=zed,phase=${phase_label}"
             local -a proxy_args
             proxy_args=(
               start
