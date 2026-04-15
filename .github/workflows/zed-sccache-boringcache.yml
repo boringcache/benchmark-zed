@@ -22,8 +22,6 @@ on:
       - "scenarios/**"
       - "scripts/**"
       - "upstream"
-  schedule:
-    - cron: "0 2 * * *"
 
 permissions:
   contents: read

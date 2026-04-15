@@ -7,7 +7,7 @@ This repo exists separately from [`boringcache/benchmarks`](https://github.com/b
 - one pinned upstream source commit
 - isolated GitHub Actions cache usage
 - one shared BoringCache workspace name: `boringcache/benchmarks`
-- independent workflow history plus commit-driven and nightly benchmark runs
+- independent workflow history plus upstream-sync-driven benchmark runs and manual dispatches
 
 ## Source Model
 
