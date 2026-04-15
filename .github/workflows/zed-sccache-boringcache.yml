@@ -1,10 +1,18 @@
 name: "Zed sccache - BoringCache"
 run-name: >-
-  BC | ${{ github.event_name == 'push' && github.event.head_commit.message || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name) }}
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'BC Rolling' || 'BC Fresh', github.event_name == 'push' && github.event.head_commit.message || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
     inputs:
+      cache_lane:
+        description: "Benchmark lane"
+        required: false
+        type: choice
+        default: fresh
+        options:
+          - fresh
+          - rolling
       cli_ref:
         description: "Optional boringcache/cli ref to build and use instead of the released CLI"
         required: false
@@ -223,9 +231,19 @@ jobs:
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           rust_release="$(rustc --version --verbose | awk '/^release:/{print $2}')"
           rust_minor="$(echo "${rust_release}" | awk -F. '{print $1 "." $2}')"
-          tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          ref_slug="$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')"
+          ref_slug="${ref_slug#-}"
+          ref_slug="${ref_slug%-}"
+          ref_slug="${ref_slug:-main}"
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-rolling-${ref_slug}"
+            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-rolling-${ref_slug}"
+            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-rolling-${ref_slug}"
+          else
+            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          fi
           tags_csv="${tag_cargo_registry},${tag_cargo_git},${tag_sccache}"
 
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
@@ -315,7 +333,10 @@ jobs:
       - name: Reset local seed state
         run: |
           set -euo pipefail
-          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          rm -rf upstream/target
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+            rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          fi
 
       - name: Capture managed rust-sccache setup start
         id: managed_seed_setup_start
@@ -481,9 +502,19 @@ jobs:
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           rust_release="$(rustc --version --verbose | awk '/^release:/{print $2}')"
           rust_minor="$(echo "${rust_release}" | awk -F. '{print $1 "." $2}')"
-          tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          ref_slug="$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')"
+          ref_slug="${ref_slug#-}"
+          ref_slug="${ref_slug%-}"
+          ref_slug="${ref_slug:-main}"
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-rolling-${ref_slug}"
+            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-rolling-${ref_slug}"
+            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-rolling-${ref_slug}"
+          else
+            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          fi
           tags_csv="${tag_cargo_registry},${tag_cargo_git},${tag_sccache}"
 
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
@@ -870,13 +901,14 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "boringcache" \
+            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "Cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations."
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: the first build restores the stable cargo registry, cargo git, and sccache state carried across upstream syncs before rebuilding the new pinned source tree. Warm1 then reuses the cache state written by that first build on the current commit.' || 'Fresh lane: cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown
@@ -890,7 +922,7 @@ jobs:
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache
+          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}

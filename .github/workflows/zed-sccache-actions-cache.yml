@@ -1,9 +1,18 @@
 name: "Zed sccache - Actions Cache"
 run-name: >-
-  AC | ${{ github.event_name == 'push' && github.event.head_commit.message || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name) }}
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'AC Rolling' || 'AC Fresh', github.event_name == 'push' && github.event.head_commit.message || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
+    inputs:
+      cache_lane:
+        description: "Benchmark lane"
+        required: false
+        type: choice
+        default: fresh
+        options:
+          - fresh
+          - rolling
   push:
     branches:
       - main
@@ -41,6 +50,7 @@ jobs:
       seed_cache_key: ${{ steps.seed_cache_key.outputs.key }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
       scope_started_at: ${{ steps.scope.outputs.scope_started_at }}
+      cache_key_prefix: ${{ steps.scope.outputs.cache_key_prefix }}
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -88,11 +98,24 @@ jobs:
         id: scope
         run: |
           set -euo pipefail
-          cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          cache_key_primary="ac-${cache_scope}-seed1"
-          cache_key_fallback="ac-${cache_scope}-seed2"
+          ref_slug="$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')"
+          ref_slug="${ref_slug#-}"
+          ref_slug="${ref_slug%-}"
+          ref_slug="${ref_slug:-main}"
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+            cache_scope="${BENCHMARK_ID}-rolling-${ref_slug}"
+            cache_key_prefix="ac-${BENCHMARK_ID}-rolling-${ref_slug}"
+            cache_key_primary="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed1"
+            cache_key_fallback="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed2"
+          else
+            cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            cache_key_prefix="ac-${cache_scope}"
+            cache_key_primary="ac-${cache_scope}-seed1"
+            cache_key_fallback="ac-${cache_scope}-seed2"
+          fi
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
+          echo "cache_key_prefix=${cache_key_prefix}" >> "$GITHUB_OUTPUT"
           echo "cache_key_primary=${cache_key_primary}" >> "$GITHUB_OUTPUT"
           echo "cache_key_fallback=${cache_key_fallback}" >> "$GITHUB_OUTPUT"
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
@@ -146,6 +169,7 @@ jobs:
           chmod +x ./run-zed-sccache-phase.sh
 
       - name: Purge benchmark GHA cache keys
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -191,11 +215,26 @@ jobs:
           echo "Cannot produce reliable AC benchmark results until cache writes are enabled." >&2
           exit 1
 
+      - name: Restore rolling actions/cache history
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/sccache
+          key: ${{ steps.scope.outputs.cache_key_primary }}
+          restore-keys: |
+            ${{ steps.scope.outputs.cache_key_prefix }}-
+
       - name: Run cold + seed cache build
         id: cold_baseline_build
         run: |
           set -euo pipefail
-          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          rm -rf upstream/target
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+            rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          fi
           mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
 
           start="$(date +%s)"
@@ -609,7 +648,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          bytes="$(./scripts/sum-gha-cache-by-key.sh "${{ needs.seed-cache.outputs.seed_cache_key }}" "${{ needs.seed-cache.outputs.scope_started_at }}")"
+          args=("${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && needs.seed-cache.outputs.cache_key_prefix || needs.seed-cache.outputs.seed_cache_key }}")
+          if [[ -n "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || needs.seed-cache.outputs.scope_started_at }}" ]]; then
+            args+=("${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || needs.seed-cache.outputs.scope_started_at }}")
+          fi
+          bytes="$(./scripts/sum-gha-cache-by-key.sh "${args[@]}")"
           echo "bytes=${bytes}" >> "$GITHUB_OUTPUT"
 
       - name: Capture committed upstream ref
@@ -622,18 +665,19 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "actions-cache" \
+            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
-            --hit-behavior-note "Cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations."
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: the first build restores the stable cargo registry, cargo git, and sccache state carried across upstream syncs before rebuilding the new pinned source tree. Warm1 then reuses the cache state written by that first build on the current commit.' || 'Fresh lane: cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache
+          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}

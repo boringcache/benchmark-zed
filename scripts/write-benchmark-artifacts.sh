@@ -3,6 +3,7 @@ set -euo pipefail
 
 benchmark=""
 strategy=""
+lane="fresh"
 project_repo=""
 project_ref=""
 cold_seconds=""
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --strategy)
       strategy="$2"
+      shift 2
+      ;;
+    --lane)
+      lane="$2"
       shift 2
       ;;
     --project-repo)
@@ -107,6 +112,15 @@ if [[ -z "$benchmark" || -z "$strategy" || -z "$project_repo" || -z "$project_re
   echo "Missing required arguments" >&2
   exit 1
 fi
+
+case "$lane" in
+  fresh|rolling)
+    ;;
+  *)
+    echo "Unsupported lane: $lane" >&2
+    exit 1
+    ;;
+esac
 
 if [[ -z "$cache_storage_source" ]]; then
   cache_storage_source="unspecified"
@@ -211,15 +225,42 @@ fi
 
 cache_storage_mib=$(awk -v bytes="$cache_storage_bytes" 'BEGIN { printf "%.2f", bytes / 1048576 }')
 
+lane_label() {
+  case "$1" in
+    rolling) echo "Rolling historical" ;;
+    *) echo "Fresh isolated" ;;
+  esac
+}
+
+first_build_label() {
+  case "$1" in
+    rolling) echo "First build after upstream sync" ;;
+    *) echo "Cold build" ;;
+  esac
+}
+
+comparison_header_label() {
+  case "$1" in
+    rolling) echo "vs First build" ;;
+    *) echo "vs Cold" ;;
+  esac
+}
+
 mkdir -p "$output_dir"
-json_path="$output_dir/${benchmark}-${strategy}.json"
-md_path="$output_dir/${benchmark}-${strategy}.md"
+json_path="$output_dir/${benchmark}-${strategy}-${lane}.json"
+md_path="$output_dir/${benchmark}-${strategy}-${lane}.md"
 generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+lane_label_value="$(lane_label "$lane")"
+first_build_label_value="$(first_build_label "$lane")"
+comparison_header_label_value="$(comparison_header_label "$lane")"
 
 cat > "$json_path" <<JSON
 {
   "benchmark": "$benchmark",
   "strategy": "$strategy",
+  "lane": "$lane",
+  "lane_label": "$lane_label_value",
+  "first_build_label": "$first_build_label_value",
   "project": {
     "repo": "$project_repo",
     "ref": "$project_ref"
@@ -270,11 +311,11 @@ cat > "$json_path" <<JSON
 JSON
 
 {
-  echo "## ${benchmark} (${strategy})"
+  echo "## ${benchmark} (${strategy}, ${lane_label_value})"
   echo ""
-  echo "| Phase | Time | vs Cold |"
+  echo "| Phase | Time | ${comparison_header_label_value} |"
   echo "|-------|------|---------|"
-  echo "| Cold (no cache) | ${cold_seconds}s | — |"
+  echo "| ${first_build_label_value} | ${cold_seconds}s | — |"
 
   if [[ -n "$warm1_seconds" ]]; then
     echo "| Warm #1 | ${warm1_seconds}s | -$(pct_vs_cold "$warm1_seconds")% |"
@@ -301,6 +342,7 @@ JSON
   echo ""
   echo "| Metric | Value |"
   echo "|--------|-------|"
+  echo "| Lane | ${lane_label_value} |"
   echo "| Project | \`${project_repo}\` |"
   echo "| Commit | \`${project_ref}\` |"
 
