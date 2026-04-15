@@ -142,12 +142,12 @@ jobs:
           fi
 
   seed-cache:
-    name: sccache Seed (BoringCache, cold)
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Seed (BoringCache, rolling)' || 'sccache Seed (BoringCache, fresh)' }}
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 240
     outputs:
-      tags_csv: ${{ steps.scope.outputs.tags_csv }}
+      tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
     steps:
       - name: Validate BoringCache secrets
@@ -229,30 +229,18 @@ jobs:
           set -euo pipefail
 
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          rust_release="$(rustc --version --verbose | awk '/^release:/{print $2}')"
-          rust_minor="$(echo "${rust_release}" | awk -F. '{print $1 "." $2}')"
           ref_slug="$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')"
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
           if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
-            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-rolling-${ref_slug}"
-            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-rolling-${ref_slug}"
-            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-rolling-${ref_slug}"
+            cache_tag_prefix="${BENCHMARK_ID}-rolling-${ref_slug}"
           else
-            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
-          tags_csv="${tag_cargo_registry},${tag_cargo_git},${tag_sccache}"
 
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
-          echo "rust_release=${rust_release}" >> "$GITHUB_OUTPUT"
-          echo "rust_minor=${rust_minor}" >> "$GITHUB_OUTPUT"
-          echo "tag_cargo_registry=${tag_cargo_registry}" >> "$GITHUB_OUTPUT"
-          echo "tag_cargo_git=${tag_cargo_git}" >> "$GITHUB_OUTPUT"
-          echo "tag_sccache=${tag_sccache}" >> "$GITHUB_OUTPUT"
-          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+          echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
 
           cat > ./run-zed-sccache-phase.sh <<'SH'
           #!/usr/bin/env bash
@@ -351,21 +339,35 @@ jobs:
           mode: rust-sccache
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           working-directory: ./upstream
-          cache-tag: ${{ env.BENCHMARK_ID }}
+          cache-tag: ${{ steps.scope.outputs.cache_tag_prefix }}
           cache-cargo: true
           cache-target: false
           tools: rust@${{ env.CLI_RUST_VERSION }}
           sccache: true
           sccache-mode: proxy
           sccache-version: 0.14.0
-          sccache-tag: ${{ steps.scope.outputs.tag_sccache }}
-          cargo-tag: ${{ steps.scope.outputs.tag_cargo_registry }}
-          cargo-git-tag: ${{ steps.scope.outputs.tag_cargo_git }}
           proxy-port: 5000
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+
+      - name: Capture resolved BoringCache tags
+        id: resolved_seed_tags
+        run: |
+          set -euo pipefail
+          tags=()
+          for tag in \
+            "${{ steps.managed_seed_setup.outputs.cargo-tag }}" \
+            "${{ steps.managed_seed_setup.outputs.cargo-git-tag }}" \
+            "${{ steps.managed_seed_setup.outputs.sccache-tag }}"; do
+            if [[ -n "$tag" ]]; then
+              tags+=("$tag")
+            fi
+          done
+          tags_csv="$(IFS=,; echo "${tags[*]}")"
+          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+          echo "sccache_tag=${{ steps.managed_seed_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Capture managed rust-sccache setup timing
         id: managed_seed_setup_timing
@@ -375,7 +377,7 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Run cold + seed cache build
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed build' || 'Run fresh seed build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -393,9 +395,9 @@ jobs:
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-seed" \
             --workspace "$BENCHMARK_WORKSPACE" \
-            --tags "${{ steps.scope.outputs.tags_csv }}" \
+            --tags "${{ steps.resolved_seed_tags.outputs.tags_csv }}" \
             --phase "seed" \
-            --cache-tag "${{ steps.scope.outputs.tag_sccache }}" \
+            --cache-tag "${{ steps.resolved_seed_tags.outputs.sccache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
             --proxy-port "${{ steps.managed_seed_setup.outputs.proxy-port }}" \
@@ -500,30 +502,18 @@ jobs:
           set -euo pipefail
 
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          rust_release="$(rustc --version --verbose | awk '/^release:/{print $2}')"
-          rust_minor="$(echo "${rust_release}" | awk -F. '{print $1 "." $2}')"
           ref_slug="$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')"
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
           if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
-            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-rolling-${ref_slug}"
-            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-rolling-${ref_slug}"
-            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-rolling-${ref_slug}"
+            cache_tag_prefix="${BENCHMARK_ID}-rolling-${ref_slug}"
           else
-            tag_cargo_registry="${BENCHMARK_ID}-cargo-registry-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-            tag_cargo_git="${BENCHMARK_ID}-cargo-git-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-            tag_sccache="${BENCHMARK_ID}-sccache-rust${rust_minor}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+            cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
-          tags_csv="${tag_cargo_registry},${tag_cargo_git},${tag_sccache}"
 
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
-          echo "rust_release=${rust_release}" >> "$GITHUB_OUTPUT"
-          echo "rust_minor=${rust_minor}" >> "$GITHUB_OUTPUT"
-          echo "tag_cargo_registry=${tag_cargo_registry}" >> "$GITHUB_OUTPUT"
-          echo "tag_cargo_git=${tag_cargo_git}" >> "$GITHUB_OUTPUT"
-          echo "tag_sccache=${tag_sccache}" >> "$GITHUB_OUTPUT"
-          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+          echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
 
           cat > ./run-zed-sccache-phase.sh <<'SH'
           #!/usr/bin/env bash
@@ -619,7 +609,7 @@ jobs:
           mode: rust-sccache
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           working-directory: ./upstream
-          cache-tag: ${{ env.BENCHMARK_ID }}
+          cache-tag: ${{ steps.scope.outputs.cache_tag_prefix }}
           cache-cargo: true
           cache-target: false
           tools: rust@${{ env.CLI_RUST_VERSION }}
@@ -628,13 +618,27 @@ jobs:
           read-only: true
           save-policy: off
           sccache-version: 0.14.0
-          sccache-tag: ${{ steps.scope.outputs.tag_sccache }}
-          cargo-tag: ${{ steps.scope.outputs.tag_cargo_registry }}
-          cargo-git-tag: ${{ steps.scope.outputs.tag_cargo_git }}
           proxy-port: 5000
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+
+      - name: Capture resolved BoringCache tags
+        id: resolved_scenario_tags
+        run: |
+          set -euo pipefail
+          tags=()
+          for tag in \
+            "${{ steps.managed_scenario_setup.outputs.cargo-tag }}" \
+            "${{ steps.managed_scenario_setup.outputs.cargo-git-tag }}" \
+            "${{ steps.managed_scenario_setup.outputs.sccache-tag }}"; do
+            if [[ -n "$tag" ]]; then
+              tags+=("$tag")
+            fi
+          done
+          tags_csv="$(IFS=,; echo "${tags[*]}")"
+          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
+          echo "sccache_tag=${{ steps.managed_scenario_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Capture managed rust-sccache setup timing
         id: managed_scenario_setup_timing
@@ -723,9 +727,9 @@ jobs:
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-${{ matrix.phase }}" \
             --workspace "$BENCHMARK_WORKSPACE" \
-            --tags "${{ steps.scope.outputs.tags_csv }}" \
+            --tags "${{ steps.resolved_scenario_tags.outputs.tags_csv }}" \
             --phase "${{ matrix.phase }}" \
-            --cache-tag "${{ steps.scope.outputs.tag_sccache }}" \
+            --cache-tag "${{ steps.resolved_scenario_tags.outputs.sccache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
             --proxy-port "${{ steps.managed_scenario_setup.outputs.proxy-port }}" \
