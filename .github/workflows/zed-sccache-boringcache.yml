@@ -28,7 +28,6 @@ env:
   PROJECT_REF: "ca0fffb927b9bd94b884b7180f3d8779c3583a98"
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
-  CLI_RELEASE_TAG: "v1.12.19"
   CLI_RUST_VERSION: "1.93"
   BORINGCACHE_STARTUP_PREFETCH_MAX_BLOBS: "999999"
   BORINGCACHE_STARTUP_PREFETCH_MAX_TOTAL_BYTES: "10737418240"
@@ -46,6 +45,7 @@ jobs:
       artifact_name: ${{ steps.resolve.outputs.artifact_name }}
       cli_source: ${{ steps.metadata.outputs.cli_source }}
       cli_ref: ${{ steps.metadata.outputs.cli_ref }}
+      cli_version: ${{ steps.metadata.outputs.cli_version }}
     steps:
       - name: Resolve CLI source
         id: resolve
@@ -60,6 +60,17 @@ jobs:
             echo "artifact_name=" >> "$GITHUB_OUTPUT"
           fi
           echo "requested_ref=${requested_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve released CLI tag
+        if: steps.resolve.outputs.use_custom_cli != 'true'
+        id: release_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_tag="$(gh api repos/boringcache/cli/releases/latest --jq .tag_name)"
+          [[ -n "$release_tag" ]] || { echo "Failed to resolve released CLI tag" >&2; exit 1; }
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout CLI repo
         if: steps.resolve.outputs.use_custom_cli == 'true'
@@ -110,9 +121,11 @@ jobs:
           if [[ "${{ steps.resolve.outputs.use_custom_cli }}" == "true" ]]; then
             echo "cli_source=custom" >> "$GITHUB_OUTPUT"
             echo "cli_ref=${{ steps.resolved_ref.outputs.cli_ref }}" >> "$GITHUB_OUTPUT"
+            echo "cli_version=" >> "$GITHUB_OUTPUT"
           else
             echo "cli_source=release" >> "$GITHUB_OUTPUT"
-            echo "cli_ref=" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "cli_version=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
           fi
 
   seed-cache:
@@ -153,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ env.CLI_RELEASE_TAG }}"
+            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
@@ -488,7 +501,7 @@ jobs:
         run: |
           set -euo pipefail
           bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ env.CLI_RELEASE_TAG }}"
+            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
@@ -967,7 +980,7 @@ jobs:
         run: |
           set -euo pipefail
           bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ env.CLI_RELEASE_TAG }}"
+            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
