@@ -260,11 +260,11 @@ jobs:
 
           run_cached_build() {
             export SCCACHE_IDLE_TIMEOUT="0"
-            if [[ "$mode" == "seed" ]]; then
-              unset CARGO_NET_OFFLINE
-            else
-              export CARGO_NET_OFFLINE="true"
-            fi
+            # Cargo git checkouts with nested submodules are not offline-complete
+            # after archive restore because .git metadata is excluded from saved
+            # entries. Allow network fallback so warm runs reflect the real
+            # restore state instead of failing outright.
+            unset CARGO_NET_OFFLINE
             mkdir -p "${SCCACHE_DIR:-${HOME}/.cache/sccache}"
             write_timing proxy_ready_seconds 0
             sccache --zero-stats >/dev/null 2>&1 || true
@@ -518,7 +518,11 @@ jobs:
 
           run_cached_build() {
             export SCCACHE_IDLE_TIMEOUT="0"
-            export CARGO_NET_OFFLINE="true"
+            # Cargo git checkouts with nested submodules are not offline-complete
+            # after archive restore because .git metadata is excluded from saved
+            # entries. Allow network fallback so warm runs reflect the real
+            # restore state instead of failing outright.
+            unset CARGO_NET_OFFLINE
             mkdir -p "${SCCACHE_DIR:-${HOME}/.cache/sccache}"
             write_timing proxy_ready_seconds 0
             sccache --zero-stats >/dev/null 2>&1 || true
