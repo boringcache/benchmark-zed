@@ -34,6 +34,7 @@ The story this benchmark is meant to show is:
 - speed on cold, warm, and stale paths
 - storage footprint in each backend
 - cache reuse through native `sccache` remote cache behavior
+- the product-managed `boringcache/one@v1` Rust `sccache` flow rather than benchmark-local proxy wiring
 - whether BoringCache can pair native `sccache` proxy hits with archived Cargo dependency state cleanly
 
 ## Token Model
