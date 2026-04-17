@@ -218,6 +218,10 @@ jobs:
           echo "Cannot produce reliable AC benchmark results until cache writes are enabled." >&2
           exit 1
 
+      - name: Start seed timing
+        id: seed_timing_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Restore rolling actions/cache history
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
         uses: actions/cache/restore@v5
@@ -240,10 +244,12 @@ jobs:
           fi
           mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
 
+          phase_start="${{ steps.seed_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Save seeded cache (primary key)
         id: save_seed_primary
@@ -423,6 +429,10 @@ jobs:
           SH
           chmod +x ./run-zed-sccache-phase.sh
 
+      - name: Start scenario timing
+        id: scenario_timing_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Reset build state for warm build 1
         if: matrix.phase == 'warm1'
         run: |
@@ -446,10 +456,12 @@ jobs:
         if: matrix.phase == 'warm1'
         run: |
           set -euo pipefail
+          phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Reset build state for warm build 2
         if: matrix.phase == 'warm2'
@@ -474,10 +486,12 @@ jobs:
         if: matrix.phase == 'warm2'
         run: |
           set -euo pipefail
+          phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Reset build state for stale-low build
         if: matrix.phase == 'stale-low'
@@ -502,10 +516,12 @@ jobs:
         if: matrix.phase == 'stale-low'
         run: |
           set -euo pipefail
+          phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           ./run-zed-sccache-phase.sh stale-low
           end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Reset build state for stale-mid build
         if: matrix.phase == 'stale-mid'
@@ -530,10 +546,12 @@ jobs:
         if: matrix.phase == 'stale-mid'
         run: |
           set -euo pipefail
+          phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           ./run-zed-sccache-phase.sh stale-mid
           end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Reset build state for stale-high build
         if: matrix.phase == 'stale-high'
@@ -558,31 +576,39 @@ jobs:
         if: matrix.phase == 'stale-high'
         run: |
           set -euo pipefail
+          phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           ./run-zed-sccache-phase.sh stale-high
           end="$(date +%s)"
-          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
       - name: Capture scenario timing
         id: phase_timing
         run: |
           set -euo pipefail
           seconds=""
+          build_seconds=""
           case "${{ matrix.phase }}" in
             warm1)
               seconds="${{ steps.warm1_build.outputs.seconds }}"
+              build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
               ;;
             warm2)
               seconds="${{ steps.warm2_build.outputs.seconds }}"
+              build_seconds="${{ steps.warm2_build.outputs.build_seconds }}"
               ;;
             stale-low)
               seconds="${{ steps.stale_low_build.outputs.seconds }}"
+              build_seconds="${{ steps.stale_low_build.outputs.build_seconds }}"
               ;;
             stale-mid)
               seconds="${{ steps.stale_mid_build.outputs.seconds }}"
+              build_seconds="${{ steps.stale_mid_build.outputs.build_seconds }}"
               ;;
             stale-high)
               seconds="${{ steps.stale_high_build.outputs.seconds }}"
+              build_seconds="${{ steps.stale_high_build.outputs.build_seconds }}"
               ;;
             *)
               echo "Unknown phase: ${{ matrix.phase }}" >&2
@@ -594,6 +620,7 @@ jobs:
             exit 1
           fi
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
+          echo "build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
       - name: Persist scenario timing artifact
         run: |
           set -euo pipefail
@@ -601,6 +628,7 @@ jobs:
           cat > "benchmark-phase/${{ matrix.phase }}.env" <<EOF
           phase=${{ matrix.phase }}
           seconds=${{ steps.phase_timing.outputs.seconds }}
+          build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
           EOF
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
