@@ -171,6 +171,9 @@ jobs:
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
 
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
@@ -377,7 +380,7 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed build' || 'Run fresh seed build' }}
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -389,7 +392,7 @@ jobs:
       - name: Collect BoringCache diagnostics
         if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
         env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
@@ -417,6 +420,7 @@ jobs:
   scenario-builds:
     name: sccache Scenario (${{ matrix.phase }}) (BoringCache)
     needs: [prepare-cli, seed-cache]
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
@@ -443,6 +447,9 @@ jobs:
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
 
       - name: Prepare scenario source tree
         run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
@@ -721,7 +728,7 @@ jobs:
       - name: Collect BoringCache diagnostics
         if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
         env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
@@ -824,6 +831,7 @@ jobs:
   finalize-benchmark:
     name: Finalize benchmark artifacts
     needs: [prepare-cli, seed-cache, scenario-builds]
+    if: ${{ always() && needs.prepare-cli.result == 'success' && needs.seed-cache.result == 'success' && (needs.scenario-builds.result == 'success' || needs.scenario-builds.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -858,12 +866,14 @@ jobs:
         run: boringcache --version
 
       - name: Download scenario timing artifacts
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-*
           path: benchmark-phase
           merge-multiple: true
       - name: Collect scenario timings
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         id: timings
         run: |
           set -euo pipefail
@@ -889,7 +899,7 @@ jobs:
       - name: Measure BoringCache storage usage
         id: cache_size
         env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
           bytes="$(./scripts/sum-boringcache-check-sizes.sh "$BENCHMARK_WORKSPACE" "$tags_csv")"
@@ -909,10 +919,10 @@ jobs:
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
-            --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
+            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: the first build restores the stable cargo registry, cargo git, and sccache state carried across upstream syncs before rebuilding the new pinned source tree. Warm1 then reuses the cache state written by that first build on the current commit.' || 'Fresh lane: cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 and layer-miss follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown

@@ -64,6 +64,9 @@ jobs:
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
 
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
@@ -132,7 +135,7 @@ jobs:
 
           run_cached_build() {
             export SCCACHE_DIR="${HOME}/.cache/sccache"
-            export SCCACHE_CACHE_SIZE="10G"
+            export SCCACHE_CACHE_SIZE="5G"
             export SCCACHE_IDLE_TIMEOUT="0"
             export RUSTC_WRAPPER="sccache"
             export CC="sccache cc"
@@ -227,7 +230,7 @@ jobs:
           restore-keys: |
             ${{ steps.scope.outputs.cache_key_prefix }}-
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed build' || 'Run fresh seed build' }}
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -303,6 +306,7 @@ jobs:
   scenario-builds:
     name: sccache Scenario (${{ matrix.phase }}) (actions/cache)
     needs: seed-cache
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -324,6 +328,9 @@ jobs:
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
 
       - name: Prepare scenario source tree
         run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
@@ -380,7 +387,7 @@ jobs:
 
           run_cached_build() {
             export SCCACHE_DIR="${HOME}/.cache/sccache"
-            export SCCACHE_CACHE_SIZE="10G"
+            export SCCACHE_CACHE_SIZE="5G"
             export SCCACHE_IDLE_TIMEOUT="0"
             export RUSTC_WRAPPER="sccache"
             export CC="sccache cc"
@@ -605,6 +612,7 @@ jobs:
   finalize-benchmark:
     name: Finalize benchmark artifacts
     needs: [seed-cache, scenario-builds]
+    if: ${{ always() && needs.seed-cache.result == 'success' && (needs.scenario-builds.result == 'success' || needs.scenario-builds.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -615,12 +623,14 @@ jobs:
           submodules: false
 
       - name: Download scenario timing artifacts
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-actions-cache-*
           path: benchmark-phase
           merge-multiple: true
       - name: Collect scenario timings
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         id: timings
         run: |
           set -euo pipefail
@@ -669,10 +679,10 @@ jobs:
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
-            --warm1-seconds "${{ steps.timings.outputs.warm1_seconds }}" \
+            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: the first build restores the stable cargo registry, cargo git, and sccache state carried across upstream syncs before rebuilding the new pinned source tree. Warm1 then reuses the cache state written by that first build on the current commit.' || 'Fresh lane: cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 and layer-miss follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
