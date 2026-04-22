@@ -37,7 +37,7 @@ def parse_int(value: str | None) -> int | None:
 
 
 def phase_sort_key(phase: str) -> tuple[int, str]:
-    order = {"warm1": 0, "warm2": 1, "stale": 2}
+    order = {"warm1": 0}
     return (order.get(phase, 100), phase)
 
 

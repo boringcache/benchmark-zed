@@ -304,15 +304,6 @@ jobs:
             seed|warm)
               run_cached_build
               ;;
-            stale-low)
-              run_cached_build
-              ;;
-            stale-mid)
-              run_cached_build
-              ;;
-            stale-high)
-              run_cached_build
-              ;;
             *)
               echo "Unknown mode: $mode" >&2
               exit 1
@@ -420,16 +411,11 @@ jobs:
 
 
   scenario-builds:
-    name: sccache Scenario (${{ matrix.phase }}) (BoringCache)
+    name: sccache Warm rerun (BoringCache)
     needs: [prepare-cli, seed-cache]
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        phase: [warm1]
     steps:
       - name: Validate BoringCache restore secret
         env:
@@ -454,7 +440,7 @@ jobs:
         run: ./scripts/free-runner-disk.sh
 
       - name: Prepare scenario source tree
-        run: ./scripts/prepare-source.sh "${{ matrix.phase }}"
+        run: ./scripts/prepare-source.sh warm1
 
       - name: Install released BoringCache CLI
         if: needs.prepare-cli.outputs.use_custom_cli != 'true'
@@ -583,15 +569,6 @@ jobs:
             seed|warm)
               run_cached_build
               ;;
-            stale-low)
-              run_cached_build
-              ;;
-            stale-mid)
-              run_cached_build
-              ;;
-            stale-high)
-              run_cached_build
-              ;;
             *)
               echo "Unknown mode: $mode" >&2
               exit 1
@@ -659,78 +636,18 @@ jobs:
 
       - name: Run warm build 1
         id: warm1_build
-        if: matrix.phase == 'warm1'
         run: |
           set -euo pipefail
-          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
+          timing_file="/tmp/zed-sccache-warm1-timing.env"
           phase_start="${{ steps.managed_scenario_setup_start.outputs.started_at }}"
           start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
+          stats_file="/tmp/zed-sccache-warm1-stats.txt"
+          BENCHMARK_PHASE_LABEL="warm1" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
 
-      - name: Run warm build 2
-        id: warm2_build
-        if: matrix.phase == 'warm2'
-        run: |
-          set -euo pipefail
-          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
-          phase_start="${{ steps.managed_scenario_setup_start.outputs.started_at }}"
-          start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
-          end="$(date +%s)"
-          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
-          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-
-      - name: Run stale-low build
-        id: stale_low_build
-        if: matrix.phase == 'stale-low'
-        run: |
-          set -euo pipefail
-          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
-          phase_start="${{ steps.managed_scenario_setup_start.outputs.started_at }}"
-          start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh stale-low
-          end="$(date +%s)"
-          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
-          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-
-      - name: Run stale-mid build
-        id: stale_mid_build
-        if: matrix.phase == 'stale-mid'
-        run: |
-          set -euo pipefail
-          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
-          phase_start="${{ steps.managed_scenario_setup_start.outputs.started_at }}"
-          start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh stale-mid
-          end="$(date +%s)"
-          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
-          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-
-      - name: Run stale-high build
-        id: stale_high_build
-        if: matrix.phase == 'stale-high'
-        run: |
-          set -euo pipefail
-          timing_file="/tmp/zed-sccache-${{ matrix.phase }}-timing.env"
-          phase_start="${{ steps.managed_scenario_setup_start.outputs.started_at }}"
-          start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
-          BENCHMARK_PHASE_LABEL="${{ matrix.phase }}" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh stale-high
-          end="$(date +%s)"
-          echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
-          echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
-          echo "build_seconds=$(grep '^build_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
 
       - name: Collect BoringCache diagnostics
         if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
@@ -739,10 +656,10 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
-            --output-dir "boringcache-diag-${{ matrix.phase }}" \
+            --output-dir "boringcache-diag-warm1" \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "${{ steps.resolved_scenario_tags.outputs.tags_csv }}" \
-            --phase "${{ matrix.phase }}" \
+            --phase "warm1" \
             --cache-tag "${{ steps.resolved_scenario_tags.outputs.sccache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
@@ -752,11 +669,11 @@ jobs:
             --cache-label "sccache-cache"
 
       - name: Upload BoringCache diagnostics
-        if: always() && hashFiles(format('boringcache-diag-{0}/**/*', matrix.phase)) != ''
+        if: always() && hashFiles('boringcache-diag-warm1/**/*') != ''
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ matrix.phase }}-boringcache
-          path: boringcache-diag-${{ matrix.phase }}
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm1-boringcache
+          path: boringcache-diag-warm1
           if-no-files-found: warn
 
       - name: Capture scenario timing
@@ -767,44 +684,12 @@ jobs:
           restore_seconds=""
           proxy_ready_seconds=""
           build_seconds=""
-          case "${{ matrix.phase }}" in
-            warm1)
-              seconds="${{ steps.warm1_build.outputs.seconds }}"
-              restore_seconds="${{ steps.managed_scenario_setup_timing.outputs.seconds }}"
-              proxy_ready_seconds="${{ steps.warm1_build.outputs.proxy_ready_seconds }}"
-              build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
-              ;;
-            warm2)
-              seconds="${{ steps.warm2_build.outputs.seconds }}"
-              restore_seconds="${{ steps.managed_scenario_setup_timing.outputs.seconds }}"
-              proxy_ready_seconds="${{ steps.warm2_build.outputs.proxy_ready_seconds }}"
-              build_seconds="${{ steps.warm2_build.outputs.build_seconds }}"
-              ;;
-            stale-low)
-              seconds="${{ steps.stale_low_build.outputs.seconds }}"
-              restore_seconds="${{ steps.managed_scenario_setup_timing.outputs.seconds }}"
-              proxy_ready_seconds="${{ steps.stale_low_build.outputs.proxy_ready_seconds }}"
-              build_seconds="${{ steps.stale_low_build.outputs.build_seconds }}"
-              ;;
-            stale-mid)
-              seconds="${{ steps.stale_mid_build.outputs.seconds }}"
-              restore_seconds="${{ steps.managed_scenario_setup_timing.outputs.seconds }}"
-              proxy_ready_seconds="${{ steps.stale_mid_build.outputs.proxy_ready_seconds }}"
-              build_seconds="${{ steps.stale_mid_build.outputs.build_seconds }}"
-              ;;
-            stale-high)
-              seconds="${{ steps.stale_high_build.outputs.seconds }}"
-              restore_seconds="${{ steps.managed_scenario_setup_timing.outputs.seconds }}"
-              proxy_ready_seconds="${{ steps.stale_high_build.outputs.proxy_ready_seconds }}"
-              build_seconds="${{ steps.stale_high_build.outputs.build_seconds }}"
-              ;;
-            *)
-              echo "Unknown phase: ${{ matrix.phase }}" >&2
-              exit 1
-              ;;
-          esac
+          seconds="${{ steps.warm1_build.outputs.seconds }}"
+          restore_seconds="${{ steps.managed_scenario_setup_timing.outputs.seconds }}"
+          proxy_ready_seconds="${{ steps.warm1_build.outputs.proxy_ready_seconds }}"
+          build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
           if [[ -z "${seconds}" || -z "${restore_seconds}" || -z "${proxy_ready_seconds}" || -z "${build_seconds}" ]]; then
-            echo "No timing captured for phase ${{ matrix.phase }}" >&2
+            echo "No timing captured for warm1" >&2
             exit 1
           fi
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
@@ -816,23 +701,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p benchmark-phase
-          cat > "benchmark-phase/${{ matrix.phase }}.env" <<EOF
-          phase=${{ matrix.phase }}
+          cat > "benchmark-phase/warm1.env" <<EOF
+          phase=warm1
           seconds=${{ steps.phase_timing.outputs.seconds }}
           restore_seconds=${{ steps.phase_timing.outputs.restore_seconds }}
           proxy_ready_seconds=${{ steps.phase_timing.outputs.proxy_ready_seconds }}
           build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
           end_to_end_seconds=${{ steps.phase_timing.outputs.end_to_end_seconds }}
           EOF
-          stats_file="/tmp/zed-sccache-${{ matrix.phase }}-stats.txt"
+          stats_file="/tmp/zed-sccache-warm1-stats.txt"
           if [[ -f "$stats_file" ]]; then
-            cp "$stats_file" "benchmark-phase/${{ matrix.phase }}-sccache-stats.txt"
+            cp "$stats_file" "benchmark-phase/warm1-sccache-stats.txt"
           fi
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-${{ matrix.phase }}
-          path: benchmark-phase/${{ matrix.phase }}*
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm1
+          path: benchmark-phase/warm1*
           if-no-files-found: error
 
   finalize-benchmark:
@@ -929,7 +814,7 @@ jobs:
             --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 and layer-miss follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown

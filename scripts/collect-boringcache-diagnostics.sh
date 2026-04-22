@@ -138,6 +138,15 @@ if [[ -f "$request_metrics" ]]; then
   cp "$request_metrics" "${output_dir}/cache-registry-request-metrics.jsonl"
 fi
 
+if [[ -n "$proxy_port" ]]; then
+  proxy_status="${output_dir}/proxy-status-${phase}.json"
+  proxy_status_stderr="${output_dir}/proxy-status-${phase}.stderr.txt"
+  if ! curl -fsS "http://127.0.0.1:${proxy_port}/_boringcache/status" \
+    -o "$proxy_status" 2> "$proxy_status_stderr"; then
+    rm -f "$proxy_status"
+  fi
+fi
+
 if [[ -n "$proxy_log_path" && -f "$proxy_log_path" ]]; then
   cp "$proxy_log_path" "${output_dir}/$(basename "$proxy_log_path")"
 fi
