@@ -146,6 +146,8 @@ jobs:
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    env:
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=${{ env.BENCHMARK_ID }},phase=seed
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -416,6 +418,8 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    env:
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=${{ env.BENCHMARK_ID }},phase=warm
     steps:
       - name: Validate BoringCache restore secret
         env:
@@ -801,6 +805,17 @@ jobs:
         id: upstream_ref
         run: echo "sha=$(git rev-parse HEAD:upstream)" >> "$GITHUB_OUTPUT"
 
+      - name: Collect BoringCache action timing report
+        id: action_timing_report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ./scripts/collect-boringcache-action-timings.py \
+            --benchmark "$BENCHMARK_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --output-dir benchmark-results
+
       - name: Write benchmark artifacts
         id: artifact_files
         run: |
@@ -814,6 +829,7 @@ jobs:
             --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
+            --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
             --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed and warm runs use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Write phase timing breakdown
@@ -834,10 +850,14 @@ jobs:
             ${{ steps.artifact_files.outputs.md_path }}
             ${{ steps.phase_breakdown.outputs.json_path }}
             ${{ steps.phase_breakdown.outputs.md_path }}
+            ${{ steps.action_timing_report.outputs.json_path }}
+            ${{ steps.action_timing_report.outputs.md_path }}
           if-no-files-found: error
 
       - name: Publish summary
         run: |
           cat "${{ steps.artifact_files.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n' >> "$GITHUB_STEP_SUMMARY"
+          cat "${{ steps.action_timing_report.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
           printf '\n' >> "$GITHUB_STEP_SUMMARY"
           cat "${{ steps.phase_breakdown.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
