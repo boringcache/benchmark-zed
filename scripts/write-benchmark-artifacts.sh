@@ -18,6 +18,7 @@ action_ref="${BENCHMARK_ACTION_REF:-}"
 action_sha="${BENCHMARK_ACTION_SHA:-}"
 web_revision="${BENCHMARK_WEB_REVISION:-}"
 api_url="${BENCHMARK_API_URL:-${BORINGCACHE_API_URL:-https://api.boringcache.com}}"
+action_timings_json=""
 output_dir="benchmark-results"
 
 while [[ $# -gt 0 ]]; do
@@ -88,6 +89,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --api-url)
       api_url="$2"
+      shift 2
+      ;;
+    --action-timings-json)
+      action_timings_json="$2"
       shift 2
       ;;
     --output-dir)
@@ -204,6 +209,15 @@ if [[ -n "$bytes_downloaded" ]] && ! [[ "$bytes_downloaded" =~ ^[0-9]+$ ]]; then
 fi
 collect_default_product_refs
 
+action_timings_payload="null"
+if [[ -n "$action_timings_json" ]]; then
+  if [[ ! -f "$action_timings_json" ]]; then
+    echo "Missing action timings JSON: $action_timings_json" >&2
+    exit 1
+  fi
+  action_timings_payload="$(jq -c '.' "$action_timings_json")"
+fi
+
 warm_count=0
 warm_total=0
 if [[ -n "$warm1_seconds" ]]; then
@@ -287,6 +301,7 @@ cat > "$json_path" <<JSON
     "storage_mib": $cache_storage_mib,
     "storage_source": "$cache_storage_source"
   },
+  "action_timings": $action_timings_payload,
   "transfer": {
     "bytes_uploaded": $(json_num_or_null "$bytes_uploaded"),
     "bytes_downloaded": $(json_num_or_null "$bytes_downloaded")
