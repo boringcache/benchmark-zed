@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=${{ env.BENCHMARK_ID }},phase=seed
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=seed
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -423,7 +423,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=${{ env.BENCHMARK_ID }},phase=warm
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=warm
     steps:
       - name: Validate BoringCache restore secret
         env:
