@@ -19,6 +19,7 @@ action_sha="${BENCHMARK_ACTION_SHA:-}"
 web_revision="${BENCHMARK_WEB_REVISION:-}"
 api_url="${BENCHMARK_API_URL:-${BORINGCACHE_API_URL:-https://api.boringcache.com}}"
 action_timings_json=""
+cache_import_status=""
 output_dir="benchmark-results"
 
 while [[ $# -gt 0 ]]; do
@@ -91,6 +92,10 @@ while [[ $# -gt 0 ]]; do
       api_url="$2"
       shift 2
       ;;
+    --cache-import-status)
+      cache_import_status="$2"
+      shift 2
+      ;;
     --action-timings-json)
       action_timings_json="$2"
       shift 2
@@ -143,6 +148,15 @@ json_string_or_null() {
     echo "null"
   else
     jq -Rn --arg value "$v" '$value'
+  fi
+}
+
+sanitize_token() {
+  local v="$1"
+  if [[ -n "$v" && "$v" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    echo "$v"
+  else
+    echo ""
   fi
 }
 
@@ -207,6 +221,7 @@ fi
 if [[ -n "$bytes_downloaded" ]] && ! [[ "$bytes_downloaded" =~ ^[0-9]+$ ]]; then
   bytes_downloaded=""
 fi
+cache_import_status="$(sanitize_token "$cache_import_status")"
 collect_default_product_refs
 
 action_timings_payload="null"
@@ -239,6 +254,12 @@ else
 fi
 
 cache_storage_mib=$(awk -v bytes="$cache_storage_bytes" 'BEGIN { printf "%.2f", bytes / 1048576 }')
+warm_rerun_succeeded=$([[ -n "$warm1_seconds" ]] && echo true || echo false)
+sample_valid=true
+reporting_mode="comparative"
+reporting_reason=""
+reporting_note=""
+validity_reason=""
 
 lane_label() {
   case "$1" in
@@ -301,13 +322,21 @@ cat > "$json_path" <<JSON
     "storage_mib": $cache_storage_mib,
     "storage_source": "$cache_storage_source"
   },
+  "classification": {
+    "sample_valid": $sample_valid,
+    "reporting_mode": $(json_string_or_null "$reporting_mode"),
+    "reporting_reason": $(json_string_or_null "$reporting_reason"),
+    "reporting_note": $(json_string_or_null "$reporting_note"),
+    "validity_reason": $(json_string_or_null "$validity_reason"),
+    "cache_import_status": $(json_string_or_null "$cache_import_status")
+  },
   "action_timings": $action_timings_payload,
   "transfer": {
     "bytes_uploaded": $(json_num_or_null "$bytes_uploaded"),
     "bytes_downloaded": $(json_num_or_null "$bytes_downloaded")
   },
   "hit_behavior": {
-    "warm_rerun_succeeded": $([[ -n "$warm1_seconds" ]] && echo true || echo false),
+    "warm_rerun_succeeded": $warm_rerun_succeeded,
     "note": $(json_string_or_null "$hit_behavior_note")
   }
 }
@@ -346,6 +375,10 @@ JSON
   if [[ "$warm_avg" != "null" ]]; then
     echo "| Warm avg | ${warm_avg}s (${warm_improvement_pct}% faster) |"
   fi
+  echo "| Reporting mode | ${reporting_mode} |"
+  if [[ -n "$cache_import_status" ]]; then
+    echo "| Cache import status | ${cache_import_status} |"
+  fi
 
   if [[ "$cache_storage_bytes" != "0" ]]; then
     echo "| Cache storage | ${cache_storage_mib} MiB |"
@@ -360,6 +393,9 @@ JSON
   fi
   if [[ -n "$hit_behavior_note" ]]; then
     echo "| Note | ${hit_behavior_note} |"
+  fi
+  if [[ -n "$reporting_note" ]]; then
+    echo "| Reporting note | ${reporting_note} |"
   fi
 } > "$md_path"
 
