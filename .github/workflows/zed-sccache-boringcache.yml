@@ -14,7 +14,7 @@ on:
           - fresh
           - rolling
       cli_ref:
-        description: "Optional boringcache/cli ref to build and use instead of the released CLI"
+        description: "Internal benchmark diagnostic only: build this boringcache/cli ref instead of using the released CLI"
         required: false
         type: string
   push:
@@ -54,7 +54,7 @@ env:
 
 jobs:
   prepare-cli:
-    name: Prepare benchmark CLI
+    name: Prepare benchmark CLI (release by default, internal override only)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -139,10 +139,21 @@ jobs:
             echo "cli_source=custom" >> "$GITHUB_OUTPUT"
             echo "cli_ref=${{ steps.resolved_ref.outputs.cli_ref }}" >> "$GITHUB_OUTPUT"
             echo "cli_version=" >> "$GITHUB_OUTPUT"
+            {
+              echo "### BoringCache CLI"
+              echo ""
+              echo "Internal benchmark diagnostic path: using custom boringcache/cli ref \`${{ steps.resolved_ref.outputs.cli_ref }}\`."
+              echo "Launch proof runs should leave \`cli_ref\` empty and use the released CLI resolved by \`boringcache/one@v1\`."
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "cli_source=release" >> "$GITHUB_OUTPUT"
             echo "cli_ref=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
             echo "cli_version=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            {
+              echo "### BoringCache CLI"
+              echo ""
+              echo "Released product path: using CLI \`${{ steps.release_tag.outputs.release_tag }}\` through \`boringcache/one@v1\`."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   seed-cache:
