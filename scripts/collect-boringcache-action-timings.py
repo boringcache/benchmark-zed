@@ -115,10 +115,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_gh(*args: str) -> str:
-    return subprocess.check_output(["gh", *args], text=True, encoding="utf-8", errors="replace")
+    return subprocess.check_output(["gh", *args], text=True, encoding="utf-8", errors="replace", stderr=subprocess.STDOUT)
+
+
+def try_run_gh(*args: str) -> tuple[str | None, str | None]:
+    try:
+        return run_gh(*args), None
+    except subprocess.CalledProcessError as error:
+        message = error.output or str(error)
+        return None, message.strip()
 
 
 def parse_timestamp(value: str) -> datetime:
+    match = re.match(r"^(?P<base>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?P<fraction>\d+))?Z$", value)
+    if match:
+        fraction = (match.group("fraction") or "0")[:6].ljust(6, "0")
+        return datetime.fromisoformat(f"{match.group('base')}.{fraction}+00:00").astimezone(timezone.utc)
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
@@ -408,6 +420,8 @@ def phase_payload(job: dict | None, phase_config: dict, repo: str) -> dict:
             "job_found": False,
             "job_name": None,
             "job_id": None,
+            "log_available": False,
+            "log_error": None,
             "configure_step_seconds": None,
             "post_step_seconds": None,
             "archive_restore": aggregate_restore([], None),
@@ -416,12 +430,26 @@ def phase_payload(job: dict | None, phase_config: dict, repo: str) -> dict:
 
     configure_step_seconds = find_step_duration(job, phase_config["configure_step"])
     post_step_seconds = find_step_duration(job, phase_config["post_step"])
-    log_text = run_gh("run", "view", "--job", str(job["databaseId"]), "--repo", repo, "--log")
+    log_text, log_error = try_run_gh("run", "view", "--job", str(job["databaseId"]), "--repo", repo, "--log")
+    if log_text is None:
+        return {
+            "job_found": True,
+            "job_name": job["name"],
+            "job_id": job["databaseId"],
+            "log_available": False,
+            "log_error": log_error,
+            "configure_step_seconds": configure_step_seconds,
+            "post_step_seconds": post_step_seconds,
+            "archive_restore": aggregate_restore([], configure_step_seconds),
+            "archive_save": aggregate_save([], post_step_seconds),
+        }
     save_entries, restore_entries = parse_job_log(log_text)
     return {
         "job_found": True,
         "job_name": job["name"],
         "job_id": job["databaseId"],
+        "log_available": True,
+        "log_error": None,
         "configure_step_seconds": configure_step_seconds,
         "post_step_seconds": post_step_seconds,
         "archive_restore": aggregate_restore(restore_entries, configure_step_seconds),
