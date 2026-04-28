@@ -1,0 +1,10 @@
+workspace = "boringcache/benchmarks"
+
+# This benchmark uses pure-proxy sccache mode (boringcache/one mode=
+# rust-sccache, sccache-mode=proxy) with no local-disk archive entries.
+# Adding ~/.cargo/{registry,git} and ~/.cache/sccache as archives to
+# match what actions/cache restores would balloon the BoringCache
+# storage footprint, and that storage-lean tradeoff is intentional for
+# this row. Keep this file as the canonical config anchor; if a hybrid
+# pivot is later approved (parallel to gRPC's BAZEL_OUTPUT_USER_ROOT
+# fix), declare the entries here and add cache-profiles to the workflow.
