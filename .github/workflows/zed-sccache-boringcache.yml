@@ -821,6 +821,7 @@ jobs:
         id: cache_size
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_CHECK_STRICT: "1"
         run: |
           tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
           bytes="$(./scripts/sum-boringcache-check-sizes.sh "$BENCHMARK_WORKSPACE" "$tags_csv")"
