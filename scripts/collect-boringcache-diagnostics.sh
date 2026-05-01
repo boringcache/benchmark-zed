@@ -154,11 +154,67 @@ fi
 if [[ -n "$tags" ]]; then
   remote_check_json="${output_dir}/remote-tag-check.json"
   remote_check_stderr="${output_dir}/remote-tag-check.stderr.txt"
-  if boringcache check "$workspace" "$tags" --no-git --json > "$remote_check_json" 2> "$remote_check_stderr"; then
+
+  archive_tags=()
+  proxy_tags=()
+  IFS=',' read -r -a tag_list <<< "$tags"
+  for raw_tag in "${tag_list[@]}"; do
+    tag="${raw_tag//[[:space:]]/}"
+    [[ -n "$tag" ]] || continue
+
+    if [[ -n "$cache_tag" && "$tag" == "$cache_tag" ]]; then
+      proxy_tags+=("$tag")
+    elif [[ "$cache_label" == "sccache-cache" && "$tag" == *"-sccache-"* ]]; then
+      proxy_tags+=("$tag")
+    else
+      archive_tags+=("$tag")
+    fi
+  done
+
+  remote_check_tmp="$(mktemp -d)"
+  remote_check_files=()
+  remote_check_ok=1
+  : > "$remote_check_stderr"
+
+  if [[ ${#archive_tags[@]} -gt 0 ]]; then
+    archive_tags_csv="$(IFS=,; echo "${archive_tags[*]}")"
+    archive_json="${remote_check_tmp}/archive.json"
+    if boringcache check "$workspace" "$archive_tags_csv" --no-git --json > "$archive_json" 2>> "$remote_check_stderr"; then
+      remote_check_files+=("$archive_json")
+    else
+      remote_check_ok=0
+    fi
+  fi
+
+  if [[ ${#proxy_tags[@]} -gt 0 ]]; then
+    proxy_tags_csv="$(IFS=,; echo "${proxy_tags[*]}")"
+    proxy_json="${remote_check_tmp}/proxy.json"
+    if boringcache check "$workspace" "$proxy_tags_csv" --no-git --no-platform --exact --json > "$proxy_json" 2>> "$remote_check_stderr"; then
+      remote_check_files+=("$proxy_json")
+    else
+      remote_check_ok=0
+    fi
+  fi
+
+  if [[ "$remote_check_ok" == "1" && ${#remote_check_files[@]} -gt 0 ]]; then
+    jq -s '
+      def all_results: [.[].results[]?];
+      {
+        schema_version: (.[0].schema_version // 1),
+        workspace: (.[0].workspace // ""),
+        total: (all_results | length),
+        hits: (all_results | map(select((.status // "") == "hit")) | length),
+        pending: (all_results | map(select((.status // "") == "pending")) | length),
+        misses: (all_results | map(select((.status // "") == "miss")) | length),
+        results: all_results
+      }
+    ' "${remote_check_files[@]}" > "$remote_check_json"
+
     if ! jq -e '.results | type == "array"' "$remote_check_json" >/dev/null 2>&1; then
       mv "$remote_check_json" "${output_dir}/remote-tag-check.txt"
     fi
   else
     rm -f "$remote_check_json"
   fi
+  rm -rf "$remote_check_tmp"
 fi
