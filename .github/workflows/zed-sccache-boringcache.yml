@@ -175,6 +175,7 @@ jobs:
       BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=seed
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
+      sccache_tag: ${{ steps.resolved_seed_tags.outputs.sccache_tag }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
     steps:
       - name: Validate BoringCache secrets
@@ -821,7 +822,7 @@ jobs:
         id: cache_size
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
-          BORINGCACHE_CHECK_STRICT: "1"
+          BORINGCACHE_EXACT_TAGS: ${{ needs.seed-cache.outputs.sccache_tag }}
         run: |
           tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
           bytes="$(./scripts/sum-boringcache-check-sizes.sh "$BENCHMARK_WORKSPACE" "$tags_csv")"
