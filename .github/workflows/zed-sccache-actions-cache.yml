@@ -53,6 +53,7 @@ jobs:
     outputs:
       seed_cache_key: ${{ steps.seed_cache_key.outputs.key }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
+      cold_build_seconds: ${{ steps.cold_baseline_build.outputs.build_seconds }}
       scope_started_at: ${{ steps.scope.outputs.scope_started_at }}
       cache_key_prefix: ${{ steps.scope.outputs.cache_key_prefix }}
     steps:
@@ -514,6 +515,11 @@ jobs:
               exit 1
             fi
             echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
+            local build_seconds
+            build_seconds="$(grep "^build_seconds=" "$file" | head -n1 | cut -d= -f2- || true)"
+            if [[ -n "${build_seconds}" ]]; then
+              echo "${key}_build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
+            fi
           }
           parse_phase warm1
       - name: Measure GHA cache storage usage
@@ -542,7 +548,9 @@ jobs:
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
+            --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
             --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
             --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
