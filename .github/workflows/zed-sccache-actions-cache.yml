@@ -85,19 +85,10 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Configure boringcache/one for Rust toolchain
-        uses: boringcache/one@v1
+      - name: Setup Rust for actions/cache tooling
+        uses: dtolnay/rust-toolchain@v1
         with:
-          cli-version: skip
-          setup: mise
-          mode: rust-sccache
-          tools: rust@${{ env.CLI_RUST_VERSION }}
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          working-directory: ./upstream
-          cache-runtime: false
-          cache-cargo: false
-          cache-target: false
-          sccache: false
+          toolchain: ${{ env.CLI_RUST_VERSION }}
 
       - name: Install sccache
         run: bash ./scripts/install-sccache.sh --version 0.14.0
@@ -342,19 +333,10 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Configure boringcache/one for Rust toolchain
-        uses: boringcache/one@v1
+      - name: Setup Rust for actions/cache tooling
+        uses: dtolnay/rust-toolchain@v1
         with:
-          cli-version: skip
-          setup: mise
-          mode: rust-sccache
-          tools: rust@${{ env.CLI_RUST_VERSION }}
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          working-directory: ./upstream
-          cache-runtime: false
-          cache-cargo: false
-          cache-target: false
-          sccache: false
+          toolchain: ${{ env.CLI_RUST_VERSION }}
 
       - name: Install sccache
         run: bash ./scripts/install-sccache.sh --version 0.14.0
