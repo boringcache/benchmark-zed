@@ -26,9 +26,6 @@
 #     Storage totals can only decrease or stay equal — never inflate.
 #   - Set BORINGCACHE_CHECK_STRICT=1 to enable `--no-platform --exact`
 #     and hard-fail on misses (grpc behavior).
-#   - Set BORINGCACHE_EXACT_TAGS=<comma-separated tags> when a benchmark
-#     mixes normal archive tags with exact proxy roots. Exact tags are checked
-#     with `--no-platform --exact`; the rest use normal CLI resolution.
 #   - Set BORINGCACHE_STORAGE_MISSING_PATH=<file> to enable the soft
 #     warning + missing-tag-list + inspect-fallback flow (hugo-go).
 #     This implies strict resolution flags but does not hard-fail.
@@ -59,29 +56,6 @@ if [[ "${BORINGCACHE_CHECK_STRICT:-0}" == "1" ]]; then
   strict_mode=1
 fi
 
-exact_tags_csv="${BORINGCACHE_EXACT_TAGS:-}"
-exact_tag_list_normalized=()
-if [[ -n "$exact_tags_csv" && "$strict_mode" == "0" && "$soft_missing_mode" == "0" ]]; then
-  IFS=',' read -r -a exact_tag_list <<< "$exact_tags_csv"
-  for raw_tag in "${exact_tag_list[@]}"; do
-    exact_tag="${raw_tag//[[:space:]]/}"
-    [[ -n "$exact_tag" ]] || continue
-    exact_tag_list_normalized+=("$exact_tag")
-  done
-fi
-
-contains_tag() {
-  local needle="$1"
-  shift
-  local candidate
-  for candidate in "$@"; do
-    if [[ "$candidate" == "$needle" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 check_args=(check "$workspace" "$tags_csv" --no-git --json)
 if (( strict_mode == 1 )); then
   check_args=(check "$workspace" "$tags_csv" --no-git --no-platform --exact --json)
@@ -89,64 +63,12 @@ fi
 
 tmp_file="$(mktemp)"
 stderr_file="$(mktemp)"
-check_tmp_dir="$(mktemp -d)"
-trap 'rm -f "$tmp_file" "$stderr_file"; rm -rf "$check_tmp_dir"' EXIT
+trap 'rm -f "$tmp_file" "$stderr_file"' EXIT
 
-if (( ${#exact_tag_list_normalized[@]} > 0 )); then
-  default_tags=()
-  exact_tags=()
-  IFS=',' read -r -a requested_tag_list <<< "$tags_csv"
-  for raw_tag in "${requested_tag_list[@]}"; do
-    tag="${raw_tag//[[:space:]]/}"
-    [[ -n "$tag" ]] || continue
-    if contains_tag "$tag" "${exact_tag_list_normalized[@]}"; then
-      exact_tags+=("$tag")
-    else
-      default_tags+=("$tag")
-    fi
-  done
-
-  check_files=()
-  if (( ${#default_tags[@]} > 0 )); then
-    default_csv="$(IFS=,; echo "${default_tags[*]}")"
-    default_file="${check_tmp_dir}/default.json"
-    check_files+=("$default_file")
-    if ! boringcache check "$workspace" "$default_csv" --json > "$default_file" 2> "$stderr_file"; then
-      echo "boringcache check failed while measuring archive storage for tags: ${default_csv}" >&2
-      cat "$stderr_file" >&2
-      exit 1
-    fi
-  fi
-
-  if (( ${#exact_tags[@]} > 0 )); then
-    exact_csv="$(IFS=,; echo "${exact_tags[*]}")"
-    exact_file="${check_tmp_dir}/exact.json"
-    check_files+=("$exact_file")
-    if ! boringcache check "$workspace" "$exact_csv" --no-git --no-platform --exact --json > "$exact_file" 2> "$stderr_file"; then
-      echo "boringcache check failed while measuring exact proxy storage for tags: ${exact_csv}" >&2
-      cat "$stderr_file" >&2
-      exit 1
-    fi
-  fi
-
-  jq -s '
-    def all_results: [.[].results[]?];
-    {
-      schema_version: (.[0].schema_version // 1),
-      workspace: (.[0].workspace // ""),
-      total: (all_results | length),
-      hits: (all_results | map(select((.status // "") == "hit")) | length),
-      pending: (all_results | map(select((.status // "") == "pending")) | length),
-      misses: (all_results | map(select((.status // "") == "miss")) | length),
-      results: all_results
-    }
-  ' "${check_files[@]}" > "$tmp_file"
-else
-  if ! boringcache "${check_args[@]}" > "$tmp_file" 2> "$stderr_file"; then
-    echo "boringcache check failed while measuring remote storage for tags: ${tags_csv}" >&2
-    cat "$stderr_file" >&2
-    exit 1
-  fi
+if ! boringcache "${check_args[@]}" > "$tmp_file" 2> "$stderr_file"; then
+  echo "boringcache check failed while measuring remote storage for tags: ${tags_csv}" >&2
+  cat "$stderr_file" >&2
+  exit 1
 fi
 
 if ! jq -e '.results | type == "array"' "$tmp_file" >/dev/null 2>&1; then
@@ -192,7 +114,7 @@ if (( soft_missing_mode == 1 )); then
     fi
   }
 
-  seen_entries=()
+  declare -A seen_entries=()
   total=0
 
   while IFS= read -r row; do
@@ -219,8 +141,8 @@ if (( soft_missing_mode == 1 )); then
       fi
     fi
 
-    if ! contains_tag "$key" "${seen_entries[@]}"; then
-      seen_entries+=("$key")
+    if [[ -z "${seen_entries[$key]+x}" ]]; then
+      seen_entries[$key]=1
       total=$((total + size))
     fi
   done < <(jq -c '.results[]? | select((.status // "") == "hit")' "$tmp_file")
