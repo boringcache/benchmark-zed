@@ -58,6 +58,7 @@ env:
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   CLI_RUST_VERSION: "1.93"
+  PROJECT_RUST_VERSION: "1.95.0"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}
   BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
   BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
@@ -246,7 +247,7 @@ jobs:
           cli-version: skip
           setup: mise
           mode: rust-sccache
-          tools: rust@${{ env.CLI_RUST_VERSION }}
+          tools: rust@${{ env.PROJECT_RUST_VERSION }}
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           working-directory: ./upstream
           cache-runtime: false
@@ -365,7 +366,7 @@ jobs:
           cache-tag: ${{ steps.scope.outputs.cache_tag_prefix }}
           cache-cargo: true
           cache-target: false
-          tools: rust@${{ env.CLI_RUST_VERSION }}
+          tools: rust@${{ env.PROJECT_RUST_VERSION }}
           sccache: true
           sccache-mode: proxy
           sccache-version: 0.14.0
@@ -513,7 +514,7 @@ jobs:
           cli-version: skip
           setup: mise
           mode: rust-sccache
-          tools: rust@${{ env.CLI_RUST_VERSION }}
+          tools: rust@${{ env.PROJECT_RUST_VERSION }}
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           working-directory: ./upstream
           cache-runtime: false
@@ -629,7 +630,7 @@ jobs:
           cache-tag: ${{ steps.scope.outputs.cache_tag_prefix }}
           cache-cargo: true
           cache-target: false
-          tools: rust@${{ env.CLI_RUST_VERSION }}
+          tools: rust@${{ env.PROJECT_RUST_VERSION }}
           sccache: true
           sccache-mode: proxy
           read-only: true

@@ -42,6 +42,7 @@ env:
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: boringcache/benchmarks
   CLI_RUST_VERSION: "1.93"
+  PROJECT_RUST_VERSION: "1.95.0"
 
 jobs:
   seed-cache:
@@ -56,6 +57,7 @@ jobs:
       cold_build_seconds: ${{ steps.cold_baseline_build.outputs.build_seconds }}
       scope_started_at: ${{ steps.scope.outputs.scope_started_at }}
       cache_key_prefix: ${{ steps.scope.outputs.cache_key_prefix }}
+      cache_import_status: ${{ steps.cache_import_status.outputs.status }}
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -88,7 +90,7 @@ jobs:
       - name: Setup Rust for actions/cache tooling
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: ${{ env.CLI_RUST_VERSION }}
+          toolchain: ${{ env.PROJECT_RUST_VERSION }}
 
       - name: Install sccache
         run: bash ./scripts/install-sccache.sh --version 0.14.0
@@ -211,6 +213,7 @@ jobs:
 
       - name: Restore rolling actions/cache history
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
+        id: restore_rolling_ac
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -220,6 +223,22 @@ jobs:
           key: ${{ steps.scope.outputs.cache_key_primary }}
           restore-keys: |
             ${{ steps.scope.outputs.cache_key_prefix }}-
+
+      - name: Resolve rolling cache import status
+        id: cache_import_status
+        env:
+          RESTORE_CACHE_MATCHED_KEY: ${{ steps.restore_rolling_ac.outputs.cache-matched-key }}
+        run: |
+          set -euo pipefail
+          status=""
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+            if [[ -n "$RESTORE_CACHE_MATCHED_KEY" ]]; then
+              status="ok"
+            else
+              status="actions_cache_miss"
+            fi
+          fi
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
 
       - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
         id: cold_baseline_build
@@ -336,7 +355,7 @@ jobs:
       - name: Setup Rust for actions/cache tooling
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: ${{ env.CLI_RUST_VERSION }}
+          toolchain: ${{ env.PROJECT_RUST_VERSION }}
 
       - name: Install sccache
         run: bash ./scripts/install-sccache.sh --version 0.14.0
@@ -535,6 +554,7 @@ jobs:
             --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
+            --cache-import-status "${{ needs.seed-cache.outputs.cache_import_status }}" \
             --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Upload benchmark artifacts
