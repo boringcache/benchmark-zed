@@ -179,7 +179,7 @@ if [[ -n "$tags" ]]; then
   if [[ ${#archive_tags[@]} -gt 0 ]]; then
     archive_tags_csv="$(IFS=,; echo "${archive_tags[*]}")"
     archive_json="${remote_check_tmp}/archive.json"
-    if boringcache check "$workspace" "$archive_tags_csv" --no-git --json > "$archive_json" 2>> "$remote_check_stderr"; then
+    if boringcache check "$workspace" "$archive_tags_csv" --json > "$archive_json" 2>> "$remote_check_stderr"; then
       remote_check_files+=("$archive_json")
     else
       remote_check_ok=0
