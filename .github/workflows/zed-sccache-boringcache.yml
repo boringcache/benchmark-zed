@@ -56,7 +56,7 @@ permissions:
 env:
   PROJECT_REPO: zed-industries/zed
   BENCHMARK_ID: zed-sccache
-  BENCHMARK_WORKSPACE: boringcache/benchmarks
+  BENCHMARK_WORKSPACE: ${{ github.repository }}
   CLI_RUST_VERSION: "1.93"
   PROJECT_RUST_VERSION: "1.95.0"
   BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}

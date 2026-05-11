@@ -1,4 +1,4 @@
-workspace = "boringcache/benchmarks"
+workspace = "boringcache/benchmark-zed"
 
 # This benchmark uses pure-proxy sccache mode (boringcache/one mode=
 # rust-sccache, sccache-mode=proxy) with no local-disk archive entries.
