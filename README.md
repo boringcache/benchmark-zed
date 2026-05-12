@@ -19,17 +19,17 @@ Pinned upstream source:
 
 ## What It Measures
 
-Fresh lane runs the same scenario set for each backend:
+Fresh lane runs a no-prior-cache cold build plus one warm rerun for each backend:
 
 - `cold`
 - `warm1`
 
-Rolling lane records only the first build after upstream sync and intentionally skips `warm1`.
+Rolling lane records the upstream commit build as-is after each upstream sync against the prior rolling cache and intentionally skips `warm1`.
 
 The story this benchmark is meant to show is:
 
 - speed on fresh cold and warm paths
-- first-build behavior after upstream sync in the rolling lane
+- commit-build behavior on normal upstream syncs in the rolling lane
 - storage footprint in each backend
 - cache reuse through native `sccache` remote cache behavior
 - the product-managed `boringcache/one@v1` Rust `sccache` flow rather than benchmark-local proxy wiring

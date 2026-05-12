@@ -46,7 +46,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Seed (actions/cache, rolling)' || 'sccache Seed (actions/cache, fresh)' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (actions/cache, rolling)' || 'sccache Cold Build (actions/cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -240,7 +240,7 @@ jobs:
           fi
           echo "status=${status}" >> "$GITHUB_OUTPUT"
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling seed-only build' || 'Run fresh seed build' }}
+      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -555,7 +555,7 @@ jobs:
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
             --cache-import-status "${{ needs.seed-cache.outputs.cache_import_status }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run executes only the upstream-sync seed build; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: cold+seed run rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6

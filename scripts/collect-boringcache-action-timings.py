@@ -15,7 +15,7 @@ BENCHMARK_CONFIGS = {
         "phases": [
             {
                 "name": "seed",
-                "job_prefixes": ["sccache Seed (BoringCache"],
+                "job_prefixes": ["sccache Cold Build (BoringCache", "sccache Commit Build (BoringCache"],
                 "configure_step": "Configure boringcache/one for Rust sccache benchmark",
                 "post_step": "Post Configure boringcache/one for Rust sccache benchmark",
             },
@@ -34,7 +34,7 @@ BENCHMARK_CONFIGS = {
         "phases": [
             {
                 "name": "seed",
-                "job_prefixes": ["Bazel Seed (BoringCache"],
+                "job_prefixes": ["Bazel Cold Build (BoringCache", "Bazel Commit Build (BoringCache"],
                 "configure_step": "Configure boringcache/one",
                 "post_step": "Post Configure boringcache/one",
             },
