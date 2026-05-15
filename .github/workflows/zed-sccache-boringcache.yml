@@ -89,17 +89,6 @@ jobs:
           fi
           echo "requested_ref=${requested_ref}" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve released CLI tag
-        if: steps.resolve.outputs.use_custom_cli != 'true'
-        id: release_tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          release_tag="$(gh api repos/boringcache/cli/releases/latest --jq .tag_name)"
-          [[ -n "$release_tag" ]] || { echo "Failed to resolve released CLI tag" >&2; exit 1; }
-          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout CLI repo
         if: steps.resolve.outputs.use_custom_cli == 'true'
         uses: actions/checkout@v6
@@ -154,16 +143,16 @@ jobs:
               echo "### BoringCache CLI"
               echo ""
               echo "Internal benchmark diagnostic path: using custom boringcache/cli ref \`${{ steps.resolved_ref.outputs.cli_ref }}\`."
-              echo "Launch proof runs should leave \`cli_ref\` empty and use the released CLI resolved by \`boringcache/one@v1\`."
+              echo "Launch proof runs should leave \`cli_ref\` empty and use the CLI bundled by \`boringcache/one@v1\`."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "cli_source=release" >> "$GITHUB_OUTPUT"
-            echo "cli_ref=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
-            echo "cli_version=${{ steps.release_tag.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "cli_source=action" >> "$GITHUB_OUTPUT"
+            echo "cli_ref=boringcache/one@v1" >> "$GITHUB_OUTPUT"
+            echo "cli_version=" >> "$GITHUB_OUTPUT"
             {
               echo "### BoringCache CLI"
               echo ""
-              echo "Released product path: using CLI \`${{ steps.release_tag.outputs.release_tag }}\` through \`boringcache/one@v1\`."
+              echo "Released product path: using the CLI bundled by \`boringcache/one@v1\`."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -207,13 +196,6 @@ jobs:
       - name: Prepare base benchmark source tree
         run: ./scripts/prepare-source.sh base
 
-      - name: Install released BoringCache CLI
-        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
-        run: |
-          set -euo pipefail
-          bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
-
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
         uses: actions/download-artifact@v8
@@ -229,6 +211,7 @@ jobs:
             --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
 
       - name: Verify BoringCache CLI
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
         run: boringcache --version
 
       - name: Install system dependencies
@@ -244,7 +227,7 @@ jobs:
       - name: Configure boringcache/one for Rust toolchain
         uses: boringcache/one@v1
         with:
-          cli-version: skip
+          cli-version: ${{ needs.prepare-cli.outputs.use_custom_cli == 'true' && 'skip' || '' }}
           setup: mise
           mode: rust-sccache
           tools: rust@${{ env.PROJECT_RUST_VERSION }}
@@ -358,7 +341,7 @@ jobs:
         id: managed_seed_setup
         uses: boringcache/one@v1
         with:
-          cli-version: skip
+          cli-version: ${{ needs.prepare-cli.outputs.use_custom_cli == 'true' && 'skip' || '' }}
           setup: mise
           mode: rust-sccache
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
@@ -474,13 +457,6 @@ jobs:
       - name: Prepare scenario source tree
         run: ./scripts/prepare-source.sh warm1
 
-      - name: Install released BoringCache CLI
-        if: needs.prepare-cli.outputs.use_custom_cli != 'true'
-        run: |
-          set -euo pipefail
-          bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
-
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
         uses: actions/download-artifact@v8
@@ -496,6 +472,7 @@ jobs:
             --artifact-dir "${RUNNER_TEMP}/boringcache-cli-artifact"
 
       - name: Verify BoringCache CLI
+        if: needs.prepare-cli.outputs.use_custom_cli == 'true'
         run: boringcache --version
 
       - name: Install system dependencies
@@ -511,7 +488,7 @@ jobs:
       - name: Configure boringcache/one for Rust toolchain
         uses: boringcache/one@v1
         with:
-          cli-version: skip
+          cli-version: ${{ needs.prepare-cli.outputs.use_custom_cli == 'true' && 'skip' || '' }}
           setup: mise
           mode: rust-sccache
           tools: rust@${{ env.PROJECT_RUST_VERSION }}
@@ -622,7 +599,7 @@ jobs:
         id: managed_scenario_setup
         uses: boringcache/one@v1
         with:
-          cli-version: skip
+          cli-version: ${{ needs.prepare-cli.outputs.use_custom_cli == 'true' && 'skip' || '' }}
           setup: mise
           mode: rust-sccache
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
@@ -765,12 +742,14 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Install released BoringCache CLI
+      - name: Install BoringCache CLI with boringcache/one
         if: needs.prepare-cli.outputs.use_custom_cli != 'true'
-        run: |
-          set -euo pipefail
-          bash ./scripts/install-benchmark-cli.sh \
-            --release-tag "${{ needs.prepare-cli.outputs.cli_version }}"
+        uses: boringcache/one@v1
+        with:
+          setup: none
+          mode: archive
+          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          cache-runtime: false
 
       - name: Download custom CLI artifact
         if: needs.prepare-cli.outputs.use_custom_cli == 'true'
