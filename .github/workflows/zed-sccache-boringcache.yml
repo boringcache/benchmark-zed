@@ -401,11 +401,12 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           set -euo pipefail
+          diagnostic_phase="${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
           ./scripts/collect-boringcache-diagnostics.sh \
-            --output-dir "boringcache-diag-seed" \
+            --output-dir "boringcache-diag-${diagnostic_phase}" \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "${{ steps.resolved_seed_tags.outputs.tags_csv }}" \
-            --phase "seed" \
+            --phase "$diagnostic_phase" \
             --cache-tag "${{ steps.resolved_seed_tags.outputs.sccache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
@@ -415,11 +416,11 @@ jobs:
             --cache-label "sccache-cache"
 
       - name: Upload BoringCache diagnostics
-        if: always() && hashFiles('boringcache-diag-seed/**/*') != ''
+        if: always() && hashFiles('boringcache-diag-*/**/*') != ''
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-seed-boringcache
-          path: boringcache-diag-seed
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}-boringcache
+          path: boringcache-diag-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
           if-no-files-found: warn
 
 
