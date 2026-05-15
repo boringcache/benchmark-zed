@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=seed
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       sccache_tag: ${{ steps.resolved_seed_tags.outputs.sccache_tag }}
