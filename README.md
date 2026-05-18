@@ -1,6 +1,6 @@
 # benchmark-zed
 
-Public Zed Rust `sccache` benchmark runner for BoringCache vs GitHub Actions cache.
+Public Zed Rust `sccache` benchmark runner for BoringCache vs GitHub Actions cache and Depot Cache.
 
 This repo exists separately from [`boringcache/benchmarks`](https://github.com/boringcache/benchmarks) so the benchmark keeps:
 
@@ -34,6 +34,7 @@ The story this benchmark is meant to show is:
 - cache reuse through native `sccache` remote cache behavior
 - the product-managed `boringcache/one@v1` Rust `sccache` flow rather than benchmark-local proxy wiring
 - whether BoringCache can pair native `sccache` proxy hits with archived Cargo dependency state cleanly
+- Depot Cache behavior through the `sccache` WebDAV backend, with cargo registry/git state cached separately
 
 ## Token Model
 
@@ -42,3 +43,5 @@ This repo uses split BoringCache tokens as the standard CI shape:
 - `BORINGCACHE_RESTORE_TOKEN` for read-only restore and proxy access
 - `BORINGCACHE_SAVE_TOKEN` for trusted write paths
 - `BORINGCACHE_API_TOKEN` only where a single bearer variable is still required for compatibility
+- `DEPOT_TOKEN` for the Depot Cache lane
+- optional `DEPOT_ORG_ID` when using a user token that belongs to multiple Depot organizations
