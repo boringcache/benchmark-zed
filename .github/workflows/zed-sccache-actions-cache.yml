@@ -1,6 +1,6 @@
-name: "Zed sccache - Actions Cache"
+name: "Zed sccache - GitHub Actions Cache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'AC Rolling' || 'AC Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'GitHub Actions Cache Rolling' || 'GitHub Actions Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (actions/cache, rolling)' || 'sccache Cold Build (actions/cache, fresh)' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (GitHub Actions Cache, rolling)' || 'sccache Cold Build (GitHub Actions Cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -156,7 +156,7 @@ jobs:
           SH
           chmod +x ./run-zed-sccache-phase.sh
 
-      - name: Purge benchmark GHA cache keys
+      - name: Purge GitHub Actions cache keys
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -181,13 +181,13 @@ jobs:
             done
           done
 
-      - name: Prepare AC write probe
+      - name: Prepare GitHub Actions Cache write probe
         run: |
           set -euo pipefail
           mkdir -p .bench-cache-probe
           printf '%s\n' "probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s)" > .bench-cache-probe/probe.txt
 
-      - name: Verify Actions Cache write access
+      - name: Verify GitHub Actions Cache write access
         id: cache_write_probe
         continue-on-error: true
         uses: actions/cache/save@v5
@@ -196,11 +196,11 @@ jobs:
             .bench-cache-probe
           key: ac-${{ env.BENCHMARK_ID }}-write-probe-r${{ github.run_id }}-a${{ github.run_attempt }}
 
-      - name: Fail early if Actions Cache is read-only
+      - name: Fail early if GitHub Actions Cache is read-only
         if: steps.cache_write_probe.outcome != 'success'
         run: |
-          echo "Actions Cache write probe failed (likely read-only budget/spending cap)." >&2
-          echo "Cannot produce reliable AC benchmark results until cache writes are enabled." >&2
+          echo "GitHub Actions Cache write probe failed (likely read-only budget/spending cap)." >&2
+          echo "Cannot produce reliable GitHub Actions Cache benchmark results until cache writes are enabled." >&2
           exit 1
 
       - name: Start seed timing
@@ -301,7 +301,7 @@ jobs:
           done
 
           if [[ -z "$key" ]]; then
-            echo "Failed to verify seeded cache key in GHA cache API (likely cache save/read-only budget issue)." >&2
+            echo "Failed to verify seeded cache key in GitHub Actions Cache API (likely cache save/read-only budget issue)." >&2
             echo "Primary save outcome: ${{ steps.save_seed_primary.outcome }}" >&2
             echo "Fallback save outcome: ${{ steps.save_seed_fallback.outcome }}" >&2
             exit 1
@@ -312,7 +312,7 @@ jobs:
 
 
   scenario-builds:
-    name: sccache Warm rerun (actions/cache)
+    name: sccache Warm rerun (GitHub Actions Cache)
     needs: seed-cache
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
@@ -519,7 +519,7 @@ jobs:
             fi
           }
           parse_phase warm1
-      - name: Measure GHA cache storage usage
+      - name: Measure GitHub Actions Cache storage usage
         id: cache_size
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

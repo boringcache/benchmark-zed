@@ -1,6 +1,6 @@
 name: "Zed sccache - Depot Cache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Depot Rolling' || 'Depot Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Depot Cache Rolling' || 'Depot Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -172,7 +172,7 @@ jobs:
           SH
           chmod +x ./run-zed-sccache-phase.sh
 
-      - name: Purge benchmark GHA cache keys
+      - name: Purge GitHub Actions cache keys
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -314,7 +314,7 @@ jobs:
           done
 
           if [[ -z "$key" ]]; then
-            echo "Failed to verify seeded cache key in GHA cache API (likely cache save/read-only budget issue)." >&2
+            echo "Failed to verify seeded cache key in GitHub Actions Cache API (likely cache save/read-only budget issue)." >&2
             echo "Primary save outcome: ${{ steps.save_seed_primary.outcome }}" >&2
             echo "Fallback save outcome: ${{ steps.save_seed_fallback.outcome }}" >&2
             exit 1
@@ -547,7 +547,7 @@ jobs:
             fi
           }
           parse_phase warm1
-      - name: Measure GHA cache storage usage
+      - name: Measure GitHub Actions Cache storage usage
         id: cache_size
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
