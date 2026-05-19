@@ -1,6 +1,6 @@
-name: "Zed sccache - GitHub Actions Cache"
+name: "Zed sccache - Depot Cache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'GitHub Actions Cache Rolling' || 'GitHub Actions Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Depot Cache Rolling' || 'Depot Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -20,6 +20,7 @@ on:
       - ".gitmodules"
       - ".github/workflows/zed-sccache-boringcache.yml"
       - ".github/workflows/zed-sccache-actions-cache.yml"
+      - ".github/workflows/zed-sccache-depot-cache.yml"
       - "README.md"
       - "scenarios/**"
       - "scripts/**"
@@ -37,16 +38,17 @@ env:
   PROJECT_REPO: zed-industries/zed
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: ${{ github.repository }}
-  CLI_RUST_VERSION: "1.93"
   PROJECT_RUST_VERSION: "1.95.0"
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (GitHub Actions Cache, rolling)' || 'sccache Cold Build (GitHub Actions Cache, fresh)' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (Depot Cache, rolling)' || 'sccache Cold Build (Depot Cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+      DEPOT_ORG_ID: ${{ secrets.DEPOT_ORG_ID || vars.DEPOT_ORG_ID || '' }}
     outputs:
       seed_cache_key: ${{ steps.seed_cache_key.outputs.key }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
@@ -83,13 +85,18 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Setup Rust for actions/cache tooling
+      - name: Setup Rust for Depot Cache benchmark
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.PROJECT_RUST_VERSION }}
 
       - name: Install sccache
         run: bash ./scripts/install-sccache.sh --version 0.14.0
+
+      - name: Validate Depot token
+        run: |
+          set -euo pipefail
+          [[ -n "${DEPOT_TOKEN}" ]] || { echo "Missing Depot token" >&2; exit 1; }
 
       - name: Prepare benchmark scope and helpers
         id: scope
@@ -101,14 +108,14 @@ jobs:
           ref_slug="${ref_slug:-main}"
           if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             cache_scope="${BENCHMARK_ID}-rolling-${ref_slug}"
-            cache_key_prefix="ac-${BENCHMARK_ID}-rolling-${ref_slug}"
+            cache_key_prefix="depot-deps-${BENCHMARK_ID}-rolling-${ref_slug}"
             cache_key_primary="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed1"
             cache_key_fallback="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed2"
           else
             cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-            cache_key_prefix="ac-${cache_scope}"
-            cache_key_primary="ac-${cache_scope}-seed1"
-            cache_key_fallback="ac-${cache_scope}-seed2"
+            cache_key_prefix="depot-deps-${cache_scope}"
+            cache_key_primary="depot-deps-${cache_scope}-seed1"
+            cache_key_fallback="depot-deps-${cache_scope}-seed2"
           fi
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
@@ -128,16 +135,25 @@ jobs:
           }
 
           run_cached_build() {
+            [[ -n "${DEPOT_TOKEN:-}" ]] || { echo "Missing Depot token" >&2; exit 1; }
             export SCCACHE_DIR="${HOME}/.cache/sccache"
             export SCCACHE_CACHE_SIZE="5G"
             export SCCACHE_IDLE_TIMEOUT="0"
+            export SCCACHE_WEBDAV_ENDPOINT="https://cache.depot.dev"
+            if [[ -n "${DEPOT_ORG_ID:-}" ]]; then
+              export SCCACHE_WEBDAV_USERNAME="${DEPOT_ORG_ID}"
+              export SCCACHE_WEBDAV_PASSWORD="${DEPOT_TOKEN}"
+              unset SCCACHE_WEBDAV_TOKEN
+            else
+              export SCCACHE_WEBDAV_TOKEN="${DEPOT_TOKEN}"
+              unset SCCACHE_WEBDAV_USERNAME SCCACHE_WEBDAV_PASSWORD
+            fi
             export RUSTC_WRAPPER="sccache"
             export CC="sccache cc"
             export CXX="sccache c++"
 
             (cd upstream && cargo build --release)
             sccache --show-stats || true
-            # Flush in-memory stats/artifacts so cache save captures stable state.
             sccache --stop-server || true
           }
 
@@ -181,33 +197,33 @@ jobs:
             done
           done
 
-      - name: Prepare GitHub Actions Cache write probe
+      - name: Prepare dependency cache write probe
         run: |
           set -euo pipefail
           mkdir -p .bench-cache-probe
           printf '%s\n' "probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s)" > .bench-cache-probe/probe.txt
 
-      - name: Verify GitHub Actions Cache write access
+      - name: Verify dependency cache write access
         id: cache_write_probe
         continue-on-error: true
         uses: actions/cache/save@v5
         with:
           path: |
             .bench-cache-probe
-          key: ac-${{ env.BENCHMARK_ID }}-write-probe-r${{ github.run_id }}-a${{ github.run_attempt }}
+          key: depot-deps-${{ env.BENCHMARK_ID }}-write-probe-r${{ github.run_id }}-a${{ github.run_attempt }}
 
-      - name: Fail early if GitHub Actions Cache is read-only
+      - name: Fail early if dependency cache is read-only
         if: steps.cache_write_probe.outcome != 'success'
         run: |
-          echo "GitHub Actions Cache write probe failed (likely read-only budget/spending cap)." >&2
-          echo "Cannot produce reliable GitHub Actions Cache benchmark results until cache writes are enabled." >&2
+          echo "Dependency cache write probe failed (likely read-only budget/spending cap)." >&2
+          echo "Cannot produce reliable Depot sccache benchmark results until dependency cache writes are enabled." >&2
           exit 1
 
       - name: Start seed timing
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore rolling actions/cache history
+      - name: Restore rolling dependency cache history
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
         id: restore_rolling_ac
         uses: actions/cache/restore@v5
@@ -215,7 +231,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cache/sccache
           key: ${{ steps.scope.outputs.cache_key_primary }}
           restore-keys: |
             ${{ steps.scope.outputs.cache_key_prefix }}-
@@ -231,7 +246,7 @@ jobs:
             if [[ -n "$RESTORE_CACHE_MATCHED_KEY" ]]; then
               status="ok"
             else
-              status="actions_cache_miss"
+              status="dependency_cache_miss"
             fi
           fi
           echo "status=${status}" >> "$GITHUB_OUTPUT"
@@ -261,7 +276,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cache/sccache
           key: ${{ steps.scope.outputs.cache_key_primary }}
 
       - name: Save seeded cache (fallback key)
@@ -273,7 +287,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cache/sccache
           key: ${{ steps.scope.outputs.cache_key_fallback }}
 
       - name: Resolve seeded cache key
@@ -312,13 +325,15 @@ jobs:
 
 
   scenario-builds:
-    name: sccache Warm rerun (GitHub Actions Cache)
+    name: sccache Warm rerun (Depot Cache)
     needs: seed-cache
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+      DEPOT_ORG_ID: ${{ secrets.DEPOT_ORG_ID || vars.DEPOT_ORG_ID || '' }}
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -348,7 +363,7 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Setup Rust for actions/cache tooling
+      - name: Setup Rust for Depot Cache benchmark
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.PROJECT_RUST_VERSION }}
@@ -356,13 +371,18 @@ jobs:
       - name: Install sccache
         run: bash ./scripts/install-sccache.sh --version 0.14.0
 
+      - name: Validate Depot token
+        run: |
+          set -euo pipefail
+          [[ -n "${DEPOT_TOKEN}" ]] || { echo "Missing Depot token" >&2; exit 1; }
+
       - name: Prepare benchmark scope and helpers
         id: scope
         run: |
           set -euo pipefail
           cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          cache_key_primary="ac-${cache_scope}-seed1"
-          cache_key_fallback="ac-${cache_scope}-seed2"
+          cache_key_primary="depot-deps-${cache_scope}-seed1"
+          cache_key_fallback="depot-deps-${cache_scope}-seed2"
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
           echo "cache_key_primary=${cache_key_primary}" >> "$GITHUB_OUTPUT"
@@ -380,16 +400,25 @@ jobs:
           }
 
           run_cached_build() {
+            [[ -n "${DEPOT_TOKEN:-}" ]] || { echo "Missing Depot token" >&2; exit 1; }
             export SCCACHE_DIR="${HOME}/.cache/sccache"
             export SCCACHE_CACHE_SIZE="5G"
             export SCCACHE_IDLE_TIMEOUT="0"
+            export SCCACHE_WEBDAV_ENDPOINT="https://cache.depot.dev"
+            if [[ -n "${DEPOT_ORG_ID:-}" ]]; then
+              export SCCACHE_WEBDAV_USERNAME="${DEPOT_ORG_ID}"
+              export SCCACHE_WEBDAV_PASSWORD="${DEPOT_TOKEN}"
+              unset SCCACHE_WEBDAV_TOKEN
+            else
+              export SCCACHE_WEBDAV_TOKEN="${DEPOT_TOKEN}"
+              unset SCCACHE_WEBDAV_USERNAME SCCACHE_WEBDAV_PASSWORD
+            fi
             export RUSTC_WRAPPER="sccache"
             export CC="sccache cc"
             export CXX="sccache c++"
 
             (cd upstream && cargo build --release)
             sccache --show-stats || true
-            # Flush in-memory stats/artifacts so cache save captures stable state.
             sccache --stop-server || true
           }
 
@@ -424,7 +453,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cache/sccache
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
@@ -466,7 +494,7 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-actions-cache-warm1
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-warm1
           path: benchmark-phase/warm1.env
           if-no-files-found: error
 
@@ -487,7 +515,7 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
-          pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-actions-cache-*
+          pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-*
           path: benchmark-phase
           merge-multiple: true
       - name: Collect scenario timings
@@ -540,7 +568,7 @@ jobs:
         run: |
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
-            --strategy "actions-cache" \
+            --strategy "depot-cache" \
             --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
@@ -549,14 +577,18 @@ jobs:
             --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
             --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
-            --cache-storage-source "github-actions-cache-api" \
+            --cache-storage-source "github-actions-cache-api-partial" \
+            --cache-storage-note "Partial measurement: this is the GitHub Actions cargo registry/git dependency cache only; Depot remote sccache storage is visible in the Depot Cache UI, not the GitHub Actions cache API." \
             --cache-import-status "${{ needs.seed-cache.outputs.cache_import_status }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}"
+            --mode sccache \
+            --adapter sccache \
+            --api-url "https://cache.depot.dev" \
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior dependency cache available through actions/cache and Depot Cache configured as the remote sccache WebDAV backend; warm1 follow-up runs are intentionally skipped. Depot Cache does not expose a run-scoped purge/key namespace through the sccache integration, so prior org sccache state may affect the sample.' || 'Fresh lane: the cold build starts from empty local cargo and sccache state, configures sccache with SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev, and saves only cargo registry/git dependency state through actions/cache. Warm1 restores only those cargo dependencies on a fresh runner and rebuilds the same pinned source tree against Depot Cache for compiler outputs.' }}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-${{ env.BENCHMARK_ID }}-depot-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}

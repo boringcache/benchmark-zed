@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       blob_download_concurrency:
-        description: "Optional BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY override for the BC run"
+        description: "Optional BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY override for the BoringCache run"
         required: false
         type: string
       blob_prefetch_concurrency:
-        description: "Optional BORINGCACHE_BLOB_PREFETCH_CONCURRENCY override for the BC run"
+        description: "Optional BORINGCACHE_BLOB_PREFETCH_CONCURRENCY override for the BoringCache run"
         required: false
         type: string
       oci_stream_through_min_bytes:
-        description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES for Docker/OCI BC runs"
+        description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES for Docker/OCI BoringCache runs"
         required: false
         type: string
   push:
@@ -32,15 +32,20 @@ permissions:
 
 jobs:
   dispatch:
-    name: Dispatch rolling benchmark pair
+    name: Dispatch rolling benchmark lanes
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch AC rolling lane
+      - name: Dispatch GitHub Actions Cache rolling lane
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run "zed-sccache-actions-cache.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}" -f cache_lane=rolling
 
-      - name: Dispatch BC rolling lane
+      - name: Dispatch Depot rolling lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run "zed-sccache-depot-cache.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}" -f cache_lane=rolling
+
+      - name: Dispatch BoringCache rolling lane
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
