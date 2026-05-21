@@ -419,6 +419,28 @@ jobs:
           path: boringcache-diag-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
           if-no-files-found: warn
 
+      - name: Capture BoringCache session summary
+        if: always()
+        run: |
+          set -euo pipefail
+          diagnostic_phase="${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          status_path="boringcache-diag-${diagnostic_phase}/proxy-status-${diagnostic_phase}.json"
+          mkdir -p benchmark-session-summary
+          if [[ -s "$status_path" ]]; then
+            jq -c '.session_summary // empty' "$status_path" > benchmark-session-summary/benchmark-session-summary.json || true
+          fi
+          if [[ ! -s benchmark-session-summary/benchmark-session-summary.json ]]; then
+            rm -f benchmark-session-summary/benchmark-session-summary.json
+          fi
+
+      - name: Upload BoringCache session summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-session-summary-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          path: benchmark-session-summary/benchmark-session-summary.json
+          if-no-files-found: ignore
+
 
   scenario-builds:
     name: sccache Warm rerun (BoringCache)
@@ -772,6 +794,13 @@ jobs:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-*
           path: benchmark-phase
           merge-multiple: true
+
+      - name: Download BoringCache session summary
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: benchmark-session-summary-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          path: benchmark-session-summary
       - name: Collect scenario timings
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         id: timings
@@ -832,6 +861,11 @@ jobs:
       - name: Write benchmark artifacts
         id: artifact_files
         run: |
+          cache_summary_args=()
+          if [[ -s benchmark-session-summary/benchmark-session-summary.json ]]; then
+            cache_summary_args=(--cache-session-summary-json benchmark-session-summary/benchmark-session-summary.json)
+          fi
+
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "boringcache" \
@@ -846,7 +880,8 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            "${cache_summary_args[@]}"
 
       - name: Write phase timing breakdown
         id: phase_breakdown
