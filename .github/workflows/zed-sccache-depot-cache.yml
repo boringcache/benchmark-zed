@@ -153,7 +153,11 @@ jobs:
             export CXX="sccache c++"
 
             (cd upstream && cargo build --release)
-            sccache --show-stats || true
+            if [[ -n "${BENCHMARK_SCCACHE_STATS_FILE:-}" ]]; then
+              sccache --show-stats | tee "$BENCHMARK_SCCACHE_STATS_FILE" || true
+            else
+              sccache --show-stats || true
+            fi
             sccache --stop-server || true
           }
 
@@ -263,10 +267,29 @@ jobs:
 
           phase_start="${{ steps.seed_timing_start.outputs.started_at }}"
           start="$(date +%s)"
-          ./run-zed-sccache-phase.sh warm
+          stats_file="/tmp/zed-sccache-seed-stats.txt"
+          BENCHMARK_PHASE_LABEL="seed" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Persist seed native tool stats
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-native-tool
+          stats_file="/tmp/zed-sccache-seed-stats.txt"
+          if [[ -f "$stats_file" ]]; then
+            cp "$stats_file" benchmark-native-tool/seed-sccache-stats.txt
+          fi
+
+      - name: Upload seed native tool stats
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-depot-cache-seed
+          path: benchmark-native-tool/seed-sccache-stats.txt
+          if-no-files-found: ignore
 
       - name: Save seeded cache (primary key)
         id: save_seed_primary
@@ -418,7 +441,11 @@ jobs:
             export CXX="sccache c++"
 
             (cd upstream && cargo build --release)
-            sccache --show-stats || true
+            if [[ -n "${BENCHMARK_SCCACHE_STATS_FILE:-}" ]]; then
+              sccache --show-stats | tee "$BENCHMARK_SCCACHE_STATS_FILE" || true
+            else
+              sccache --show-stats || true
+            fi
             sccache --stop-server || true
           }
 
@@ -462,7 +489,8 @@ jobs:
           set -euo pipefail
           phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
-          ./run-zed-sccache-phase.sh warm
+          stats_file="/tmp/zed-sccache-warm1-stats.txt"
+          BENCHMARK_PHASE_LABEL="warm1" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
@@ -491,11 +519,15 @@ jobs:
           seconds=${{ steps.phase_timing.outputs.seconds }}
           build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
           EOF
+          stats_file="/tmp/zed-sccache-warm1-stats.txt"
+          if [[ -f "$stats_file" ]]; then
+            cp "$stats_file" "benchmark-phase/warm1-sccache-stats.txt"
+          fi
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
           name: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-warm1
-          path: benchmark-phase/warm1.env
+          path: benchmark-phase/warm1*
           if-no-files-found: error
 
   finalize-benchmark:
@@ -518,6 +550,12 @@ jobs:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-*
           path: benchmark-phase
           merge-multiple: true
+      - name: Download seed native tool stats
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-depot-cache-seed
+          path: benchmark-native-tool
       - name: Collect scenario timings
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
         id: timings
@@ -566,6 +604,13 @@ jobs:
       - name: Write benchmark artifacts
         id: artifact_files
         run: |
+          native_tool_args=()
+          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
+            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-stats.txt)
+          elif [[ -s benchmark-native-tool/seed-sccache-stats.txt ]]; then
+            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/seed-sccache-stats.txt)
+          fi
+
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "depot-cache" \
@@ -583,7 +628,8 @@ jobs:
             --mode sccache \
             --adapter sccache \
             --api-url "https://cache.depot.dev" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior dependency cache available through actions/cache and Depot Cache configured as the remote sccache WebDAV backend; warm1 follow-up runs are intentionally skipped. Depot Cache does not expose a run-scoped purge/key namespace through the sccache integration, so prior org sccache state may affect the sample.' || 'Fresh lane: the cold build starts from empty local cargo and sccache state, configures sccache with SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev, and saves only cargo registry/git dependency state through actions/cache. Warm1 restores only those cargo dependencies on a fresh runner and rebuilds the same pinned source tree against Depot Cache for compiler outputs.' }}"
+            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior dependency cache available through actions/cache and Depot Cache configured as the remote sccache WebDAV backend; warm1 follow-up runs are intentionally skipped. Depot Cache does not expose a run-scoped purge/key namespace through the sccache integration, so prior org sccache state may affect the sample.' || 'Fresh lane: the cold build starts from empty local cargo and sccache state, configures sccache with SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev, and saves only cargo registry/git dependency state through actions/cache. Warm1 restores only those cargo dependencies on a fresh runner and rebuilds the same pinned source tree against Depot Cache for compiler outputs.' }}" \
+            "${native_tool_args[@]}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
