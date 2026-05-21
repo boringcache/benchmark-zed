@@ -33,8 +33,20 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --remote --merge upstream
 
+          github_repo_slug() {
+            local url="$1"
+            url="${url%/}"
+            url="${url#https://github.com/}"
+            url="${url#git@github.com:}"
+            url="${url#ssh://git@github.com/}"
+            url="${url%.git}"
+            url="${url%/}"
+            printf '%s' "$url"
+          }
+
           upstream_url="$(cd upstream && git remote get-url origin)"
-          commit_sha="$(cd upstream && git rev-parse HEAD)"
+          upstream_repo="$(github_repo_slug "$upstream_url")"
+          commit_sha="$(cd upstream && git rev-parse --short=7 HEAD)"
 
           if git diff --quiet --submodule=short; then
             echo "No upstream changes"
@@ -42,5 +54,5 @@ jobs:
           fi
 
           git add upstream
-          git commit -m "Update upstream to ${upstream_url}/commit/${commit_sha}"
+          git commit -m "Update upstream to ${upstream_repo}@${commit_sha}"
           git push origin HEAD:main
