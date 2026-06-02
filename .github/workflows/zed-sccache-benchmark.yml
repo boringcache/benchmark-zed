@@ -1,0 +1,87 @@
+name: "Zed sccache Benchmark"
+run-name: >-
+  ${{ format('Benchmark {0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling' || 'Fresh', github.event_name == 'schedule' && 'Scheduled' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_lane:
+        description: "Benchmark lane"
+        required: false
+        type: choice
+        default: fresh
+        options:
+          - fresh
+          - rolling
+      cli_ref:
+        description: "Internal benchmark diagnostic only: build this boringcache/cli ref instead of using the released CLI"
+        required: false
+        type: string
+      blob_download_concurrency:
+        description: "Optional BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY override (blank = adaptive)"
+        required: false
+        type: string
+      blob_prefetch_concurrency:
+        description: "Optional BORINGCACHE_BLOB_PREFETCH_CONCURRENCY override (blank = match download concurrency)"
+        required: false
+        type: string
+      oci_stream_through_min_bytes:
+        description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES (Docker/OCI only; blank = disabled)"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 4 * * 5"
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - ".github/workflows/zed-sccache-benchmark.yml"
+      - ".github/workflows/zed-sccache-actions-cache.yml"
+      - ".github/workflows/zed-sccache-boringcache.yml"
+      - ".github/workflows/zed-sccache-depot-cache.yml"
+      - "README.md"
+      - "scenarios/**"
+      - "scripts/**"
+      - "upstream"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  github-actions-cache:
+    name: Build with GitHub Actions Cache
+    uses: ./.github/workflows/zed-sccache-actions-cache.yml
+    with:
+      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+    secrets: inherit
+    permissions:
+      contents: read
+      actions: write
+
+  depot-cache:
+    name: Build with Depot Cache
+    uses: ./.github/workflows/zed-sccache-depot-cache.yml
+    with:
+      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+    secrets: inherit
+    permissions:
+      contents: read
+      actions: write
+
+  boringcache:
+    name: Build with BoringCache
+    uses: ./.github/workflows/zed-sccache-boringcache.yml
+    with:
+      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+      cli_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.cli_ref || '' }}
+      blob_download_concurrency: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}
+      blob_prefetch_concurrency: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
+      oci_stream_through_min_bytes: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
+    secrets: inherit
+    permissions:
+      contents: read
+      actions: read

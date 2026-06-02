@@ -32,24 +32,14 @@ permissions:
 
 jobs:
   dispatch:
-    name: Dispatch rolling benchmark lanes
+    name: Dispatch rolling benchmark
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch GitHub Actions Cache rolling lane
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run "zed-sccache-actions-cache.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}" -f cache_lane=rolling
-
-      - name: Dispatch Depot rolling lane
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run "zed-sccache-depot-cache.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}" -f cache_lane=rolling
-
-      - name: Dispatch BoringCache rolling lane
+      - name: Dispatch rolling benchmark
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh workflow run "zed-sccache-boringcache.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}"
+          gh workflow run "zed-sccache-benchmark.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}"
           -f cache_lane=rolling
           -f blob_download_concurrency="${{ inputs.blob_download_concurrency || '' }}"
           -f blob_prefetch_concurrency="${{ inputs.blob_prefetch_concurrency || '' }}"

@@ -1,6 +1,6 @@
 name: "Zed sccache - GitHub Actions Cache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'GitHub Actions Cache Rolling' || 'GitHub Actions Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'GitHub Actions Cache Rolling' || 'GitHub Actions Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -13,20 +13,15 @@ on:
         options:
           - fresh
           - rolling
-  schedule:
-    - cron: "0 4 * * 5"
-  pull_request:
-    paths:
-      - ".gitmodules"
-      - ".github/workflows/zed-sccache-boringcache.yml"
-      - ".github/workflows/zed-sccache-actions-cache.yml"
-      - "README.md"
-      - "scenarios/**"
-      - "scripts/**"
-      - "upstream"
+  workflow_call:
+    inputs:
+      cache_lane:
+        required: false
+        type: string
+        default: fresh
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
 
 permissions:
@@ -42,7 +37,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (GitHub Actions Cache, rolling)' || 'sccache Cold Build (GitHub Actions Cache, fresh)' }}
+    name: ${{ inputs.cache_lane == 'rolling' && 'sccache Commit Build (GitHub Actions Cache, rolling)' || 'sccache Cold Build (GitHub Actions Cache, fresh)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -99,7 +94,7 @@ jobs:
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             cache_scope="${BENCHMARK_ID}-rolling-${ref_slug}"
             cache_key_prefix="ac-${BENCHMARK_ID}-rolling-${ref_slug}"
             cache_key_primary="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed1"
@@ -161,7 +156,7 @@ jobs:
           chmod +x ./run-zed-sccache-phase.sh
 
       - name: Purge GitHub Actions cache keys
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -212,7 +207,7 @@ jobs:
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Restore rolling actions/cache history
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' }}
+        if: ${{ inputs.cache_lane == 'rolling' }}
         id: restore_rolling_ac
         uses: actions/cache/restore@v5
         with:
@@ -231,7 +226,7 @@ jobs:
         run: |
           set -euo pipefail
           status=""
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             if [[ -n "$RESTORE_CACHE_MATCHED_KEY" ]]; then
               status="ok"
             else
@@ -240,12 +235,12 @@ jobs:
           fi
           echo "status=${status}" >> "$GITHUB_OUTPUT"
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
+      - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
           rm -rf upstream/target
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
             rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           fi
           mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
@@ -337,7 +332,7 @@ jobs:
   scenario-builds:
     name: sccache Warm rerun (GitHub Actions Cache)
     needs: seed-cache
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+    if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -516,7 +511,7 @@ jobs:
           submodules: false
 
       - name: Download scenario timing artifacts
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-actions-cache-*
@@ -529,7 +524,7 @@ jobs:
           name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-actions-cache-seed
           path: benchmark-native-tool
       - name: Collect scenario timings
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         id: timings
         run: |
           set -euo pipefail
@@ -562,9 +557,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          args=("${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && needs.seed-cache.outputs.cache_key_prefix || needs.seed-cache.outputs.seed_cache_key }}")
-          if [[ -n "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || needs.seed-cache.outputs.scope_started_at }}" ]]; then
-            args+=("${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || needs.seed-cache.outputs.scope_started_at }}")
+          args=("${{ inputs.cache_lane == 'rolling' && needs.seed-cache.outputs.cache_key_prefix || needs.seed-cache.outputs.seed_cache_key }}")
+          if [[ -n "${{ inputs.cache_lane == 'rolling' && '' || needs.seed-cache.outputs.scope_started_at }}" ]]; then
+            args+=("${{ inputs.cache_lane == 'rolling' && '' || needs.seed-cache.outputs.scope_started_at }}")
           fi
           bytes="$(./scripts/sum-gha-cache-by-key.sh "${args[@]}")"
           echo "bytes=${bytes}" >> "$GITHUB_OUTPUT"
@@ -577,7 +572,7 @@ jobs:
         id: artifact_files
         run: |
           native_tool_args=()
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-stats.txt)
           elif [[ -s benchmark-native-tool/seed-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/seed-sccache-stats.txt)
@@ -586,23 +581,23 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "actions-cache" \
-            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
+            --lane "${{ inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
-            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
-            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
+            --warm1-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "github-actions-cache-api" \
             --cache-import-status "${{ needs.seed-cache.outputs.cache_import_status }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build rebuilds from empty state with sccache enabled, then saves cargo registry/git and sccache directories to actions/cache under a run-scoped key while recording cold timing. Warm1 restores that same cargo+sccache state on a fresh runner and rebuilds the same pinned source tree without synthetic mutations.' }}" \
             "${native_tool_args[@]}"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-${{ env.BENCHMARK_ID }}-actions-cache-${{ inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}

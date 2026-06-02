@@ -1,6 +1,6 @@
 name: "Zed sccache - BoringCache"
 run-name: >-
-  ${{ format('{0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'BoringCache Rolling' || 'BoringCache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'BoringCache Rolling' || 'BoringCache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -29,20 +29,31 @@ on:
         description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES (Docker/OCI only; blank = disabled)"
         required: false
         type: string
-  schedule:
-    - cron: "0 4 * * 5"
-  pull_request:
-    paths:
-      - ".gitmodules"
-      - ".github/workflows/zed-sccache-boringcache.yml"
-      - ".github/workflows/zed-sccache-actions-cache.yml"
-      - "README.md"
-      - "scenarios/**"
-      - "scripts/**"
-      - "upstream"
+  workflow_call:
+    inputs:
+      cache_lane:
+        required: false
+        type: string
+        default: fresh
+      cli_ref:
+        required: false
+        type: string
+        default: ""
+      blob_download_concurrency:
+        required: false
+        type: string
+        default: ""
+      blob_prefetch_concurrency:
+        required: false
+        type: string
+        default: ""
+      oci_stream_through_min_bytes:
+        required: false
+        type: string
+        default: ""
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
 
 permissions:
@@ -55,9 +66,9 @@ env:
   BENCHMARK_WORKSPACE: ${{ github.repository }}
   CLI_RUST_VERSION: "1.93"
   PROJECT_RUST_VERSION: "1.95.0"
-  BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}
-  BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
-  BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
+  BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY: ${{ inputs.blob_download_concurrency || '' }}
+  BORINGCACHE_BLOB_PREFETCH_CONCURRENCY: ${{ inputs.blob_prefetch_concurrency || '' }}
+  BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES: ${{ inputs.oci_stream_through_min_bytes || '' }}
 
 jobs:
   prepare-cli:
@@ -75,7 +86,7 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
-          requested_ref="${{ github.event.inputs.cli_ref || '' }}"
+          requested_ref="${{ inputs.cli_ref || '' }}"
           if [[ -n "$requested_ref" ]]; then
             echo "use_custom_cli=true" >> "$GITHUB_OUTPUT"
             echo "artifact_name=boringcache-cli-linux-amd64" >> "$GITHUB_OUTPUT"
@@ -153,12 +164,12 @@ jobs:
           fi
 
   seed-cache:
-    name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'sccache Commit Build (BoringCache, rolling)' || 'sccache Cold Build (BoringCache, fresh)' }}
+    name: ${{ inputs.cache_lane == 'rolling' && 'sccache Commit Build (BoringCache, rolling)' || 'sccache Cold Build (BoringCache, fresh)' }}
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       sccache_tag: ${{ steps.resolved_seed_tags.outputs.sccache_tag }}
@@ -245,7 +256,7 @@ jobs:
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             cache_tag_prefix="${BENCHMARK_ID}-rolling-${ref_slug}"
           else
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
@@ -325,7 +336,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf upstream/target
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
             rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           fi
 
@@ -380,7 +391,7 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
+      - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
@@ -416,7 +427,7 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           set -euo pipefail
-          diagnostic_phase="${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-${diagnostic_phase}" \
             --workspace "$BENCHMARK_WORKSPACE" \
@@ -434,15 +445,15 @@ jobs:
         if: always() && hashFiles('boringcache-diag-*/**/*') != ''
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}-boringcache
-          path: boringcache-diag-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}-boringcache
+          path: boringcache-diag-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
           if-no-files-found: warn
 
       - name: Capture BoringCache session summary
         if: always()
         run: |
           set -euo pipefail
-          diagnostic_phase="${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
           status_path="boringcache-diag-${diagnostic_phase}/proxy-status-${diagnostic_phase}.json"
           mkdir -p benchmark-session-summary
           if [[ -s "$status_path" ]]; then
@@ -456,7 +467,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-session-summary-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-session-summary-${{ env.BENCHMARK_ID }}-boringcache-${{ inputs.cache_lane || 'fresh' }}
           path: benchmark-session-summary/benchmark-session-summary.json
           if-no-files-found: ignore
 
@@ -464,7 +475,7 @@ jobs:
   scenario-builds:
     name: sccache Warm rerun (BoringCache)
     needs: [prepare-cli, seed-cache]
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+    if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -548,7 +559,7 @@ jobs:
           ref_slug="${ref_slug#-}"
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             cache_tag_prefix="${BENCHMARK_ID}-rolling-${ref_slug}"
           else
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
@@ -807,7 +818,7 @@ jobs:
         run: boringcache --version
 
       - name: Download scenario timing artifacts
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         uses: actions/download-artifact@v8
         with:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-*
@@ -825,10 +836,10 @@ jobs:
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: benchmark-session-summary-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-session-summary-${{ env.BENCHMARK_ID }}-boringcache-${{ inputs.cache_lane || 'fresh' }}
           path: benchmark-session-summary
       - name: Collect scenario timings
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.cache_lane != 'rolling' }}
+        if: ${{ inputs.cache_lane != 'rolling' }}
         id: timings
         run: |
           set -euo pipefail
@@ -894,7 +905,7 @@ jobs:
             cache_summary_args=(--cache-session-summary-json benchmark-session-summary/benchmark-session-summary.json)
           fi
           native_tool_args=()
-          if [[ "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-stats.txt)
           elif [[ -s benchmark-native-tool/seed-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/seed-sccache-stats.txt)
@@ -903,18 +914,18 @@ jobs:
           ./scripts/write-benchmark-artifacts.sh \
             --benchmark "$BENCHMARK_ID" \
             --strategy "boringcache" \
-            --lane "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}" \
+            --lane "${{ inputs.cache_lane || 'fresh' }}" \
             --project-repo "$PROJECT_REPO" \
             --project-ref "${{ steps.upstream_ref.outputs.sha }}" \
             --cold-seconds "${{ needs.seed-cache.outputs.cold_seconds }}" \
             --cold-build-seconds "${{ needs.seed-cache.outputs.cold_build_seconds }}" \
-            --warm1-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
-            --warm1-build-seconds "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
+            --warm1-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_seconds }}" \
+            --warm1-build-seconds "${{ inputs.cache_lane == 'rolling' && '' || steps.timings.outputs.warm1_build_seconds }}" \
             --cache-storage-bytes "${{ steps.cache_size.outputs.bytes }}" \
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
             "${cache_summary_args[@]}" \
             "${native_tool_args[@]}"
 
@@ -930,7 +941,7 @@ jobs:
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache-${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+          name: benchmark-${{ env.BENCHMARK_ID }}-boringcache-${{ inputs.cache_lane || 'fresh' }}
           path: |
             ${{ steps.artifact_files.outputs.json_path }}
             ${{ steps.artifact_files.outputs.md_path }}
