@@ -53,7 +53,7 @@ on:
         default: ""
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
+  group: ${{ github.workflow_ref }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
 
 permissions:
