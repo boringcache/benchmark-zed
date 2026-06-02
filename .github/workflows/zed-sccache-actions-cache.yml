@@ -21,7 +21,7 @@ on:
         default: fresh
 
 concurrency:
-  group: ${{ github.workflow_ref }}-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
+  group: zed-sccache-actions-cache-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
 
 permissions:
