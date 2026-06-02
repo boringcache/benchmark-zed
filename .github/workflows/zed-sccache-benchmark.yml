@@ -58,9 +58,6 @@ jobs:
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: write
 
   depot-cache:
     name: Build with Depot Cache
@@ -68,9 +65,6 @@ jobs:
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: write
 
   boringcache:
     name: Build with BoringCache
@@ -82,6 +76,3 @@ jobs:
       blob_prefetch_concurrency: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
       oci_stream_through_min_bytes: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
     secrets: inherit
-    permissions:
-      contents: read
-      actions: read
