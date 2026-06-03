@@ -1,6 +1,6 @@
-name: "Zed sccache - Depot Cache"
+name: "Zed sccache - Depot"
 run-name: >-
-  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'Depot Cache Rolling' || 'Depot Cache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'Depot Rolling' || 'Depot Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ env:
 
 jobs:
   seed-cache:
-    name: ${{ inputs.cache_lane == 'rolling' && 'sccache Commit Build (Depot Cache, rolling)' || 'sccache Cold Build (Depot Cache, fresh)' }}
+    name: ${{ inputs.cache_lane == 'rolling' && 'Commit' || 'Cold' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -342,7 +342,7 @@ jobs:
 
 
   scenario-builds:
-    name: sccache Warm rerun (Depot Cache)
+    name: Warm
     needs: seed-cache
     if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
@@ -525,7 +525,7 @@ jobs:
           if-no-files-found: error
 
   finalize-benchmark:
-    name: Finalize benchmark artifacts
+    name: Report
     needs: [seed-cache, scenario-builds]
     if: ${{ always() && needs.seed-cache.result == 'success' && (needs.scenario-builds.result == 'success' || needs.scenario-builds.result == 'skipped') }}
     runs-on: ubuntu-latest

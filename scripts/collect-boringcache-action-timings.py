@@ -15,13 +15,22 @@ BENCHMARK_CONFIGS = {
         "phases": [
             {
                 "name": "seed",
-                "job_prefixes": ["sccache Cold Build (BoringCache", "sccache Commit Build (BoringCache"],
+                "job_prefixes": [
+                    "BC / Cold",
+                    "BC / Commit",
+                    "Cold",
+                    "Commit",
+                    "sccache Cold Build (BoringCache",
+                    "sccache Commit Build (BoringCache",
+                ],
                 "configure_step": "Configure boringcache/one for Rust sccache benchmark",
                 "post_step": "Post Configure boringcache/one for Rust sccache benchmark",
             },
             {
                 "name": "warm1",
                 "job_prefixes": [
+                    "BC / Warm",
+                    "Warm",
                     "sccache Warm rerun (BoringCache)",
                     "sccache Scenario (warm1) (BoringCache)",
                 ],

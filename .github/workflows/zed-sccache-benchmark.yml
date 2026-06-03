@@ -49,21 +49,21 @@ permissions:
 
 jobs:
   github-actions-cache:
-    name: Build with GitHub Actions Cache
+    name: GHA
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
 
   depot-cache:
-    name: Build with Depot Cache
+    name: Depot
     uses: ./.github/workflows/zed-sccache-depot-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
 
   boringcache:
-    name: Build with BoringCache
+    name: BC
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}

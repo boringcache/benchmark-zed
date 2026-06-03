@@ -1,6 +1,6 @@
-name: "Zed sccache - BoringCache"
+name: "Zed sccache - BC"
 run-name: >-
-  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'BoringCache Rolling' || 'BoringCache Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('{0} | {1}', inputs.cache_lane == 'rolling' && 'BC Rolling' || 'BC Fresh', github.event_name == 'schedule' && 'Weekly fresh' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -72,7 +72,7 @@ env:
 
 jobs:
   prepare-cli:
-    name: Prepare benchmark CLI (release by default, internal override only)
+    name: CLI
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -164,7 +164,7 @@ jobs:
           fi
 
   seed-cache:
-    name: ${{ inputs.cache_lane == 'rolling' && 'sccache Commit Build (BoringCache, rolling)' || 'sccache Cold Build (BoringCache, fresh)' }}
+    name: ${{ inputs.cache_lane == 'rolling' && 'Commit' || 'Cold' }}
     needs: prepare-cli
     runs-on: ubuntu-latest
     timeout-minutes: 240
@@ -473,7 +473,7 @@ jobs:
 
 
   scenario-builds:
-    name: sccache Warm rerun (BoringCache)
+    name: Warm
     needs: [prepare-cli, seed-cache]
     if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
@@ -779,7 +779,7 @@ jobs:
           if-no-files-found: error
 
   finalize-benchmark:
-    name: Finalize benchmark artifacts
+    name: Report
     needs: [prepare-cli, seed-cache, scenario-builds]
     if: ${{ always() && needs.prepare-cli.result == 'success' && needs.seed-cache.result == 'success' && (needs.scenario-builds.result == 'success' || needs.scenario-builds.result == 'skipped') }}
     runs-on: ubuntu-latest

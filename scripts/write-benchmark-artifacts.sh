@@ -1495,10 +1495,10 @@ comparison_header_label() {
 
 strategy_label() {
   case "$1" in
-    actions-cache) echo "GitHub Actions Cache" ;;
-    boringcache) echo "BoringCache" ;;
-    depot-cache) echo "Depot Cache" ;;
-    buildbuddy-cache) echo "BuildBuddy Cache" ;;
+    actions-cache) echo "GHA" ;;
+    boringcache) echo "BC" ;;
+    depot-cache) echo "Depot" ;;
+    buildbuddy-cache) echo "BuildBuddy" ;;
     *) echo "$1" ;;
   esac
 }
