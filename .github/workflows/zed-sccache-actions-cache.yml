@@ -457,7 +457,7 @@ jobs:
           phase_start="${{ steps.scenario_timing_start.outputs.started_at }}"
           start="$(date +%s)"
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
-          BENCHMARK_PHASE_LABEL="warm1" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
+          BENCHMARK_PHASE_LABEL="warm" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"

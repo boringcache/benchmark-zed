@@ -700,7 +700,7 @@ jobs:
           phase_start="${{ steps.managed_scenario_setup_start.outputs.started_at }}"
           start="$(date +%s)"
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
-          BENCHMARK_PHASE_LABEL="warm1" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
+          BENCHMARK_PHASE_LABEL="warm" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -714,10 +714,10 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
-            --output-dir "boringcache-diag-warm1" \
+            --output-dir "boringcache-diag-warm" \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "${{ steps.resolved_scenario_tags.outputs.tags_csv }}" \
-            --phase "warm1" \
+            --phase "warm" \
             --cache-tag "${{ steps.resolved_scenario_tags.outputs.sccache_tag }}" \
             --cli-source "${{ needs.prepare-cli.outputs.cli_source }}" \
             --cli-ref "${{ needs.prepare-cli.outputs.cli_ref }}" \
@@ -727,11 +727,11 @@ jobs:
             --cache-label "sccache-cache"
 
       - name: Upload BoringCache diagnostics
-        if: always() && hashFiles('boringcache-diag-warm1/**/*') != ''
+        if: always() && hashFiles('boringcache-diag-warm/**/*') != ''
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm1-boringcache
-          path: boringcache-diag-warm1
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm-boringcache
+          path: boringcache-diag-warm
           if-no-files-found: warn
 
       - name: Capture scenario timing
