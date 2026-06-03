@@ -169,7 +169,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       sccache_tag: ${{ steps.resolved_seed_tags.outputs.sccache_tag }}
@@ -332,7 +332,7 @@ jobs:
           SH
           chmod +x ./run-zed-sccache-phase.sh
 
-      - name: Reset local seed state
+      - name: Reset local build state
         run: |
           set -euo pipefail
           rm -rf upstream/target
@@ -397,28 +397,28 @@ jobs:
           set -euo pipefail
           phase_start="${{ steps.managed_seed_setup_start.outputs.started_at }}"
           start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-seed-stats.txt"
-          BENCHMARK_PHASE_LABEL="seed" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh seed
+          stats_file="/tmp/zed-sccache-cold-stats.txt"
+          BENCHMARK_PHASE_LABEL="cold" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh seed
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Persist seed native tool stats
+      - name: Persist build native tool stats
         if: always()
         run: |
           set -euo pipefail
           mkdir -p benchmark-native-tool
-          stats_file="/tmp/zed-sccache-seed-stats.txt"
+          stats_file="/tmp/zed-sccache-cold-stats.txt"
           if [[ -f "$stats_file" ]]; then
-            cp "$stats_file" benchmark-native-tool/seed-sccache-stats.txt
+            cp "$stats_file" benchmark-native-tool/build-sccache-stats.txt
           fi
 
-      - name: Upload seed native tool stats
+      - name: Upload build native tool stats
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-boringcache-seed
-          path: benchmark-native-tool/seed-sccache-stats.txt
+          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-boringcache-build
+          path: benchmark-native-tool/build-sccache-stats.txt
           if-no-files-found: ignore
 
       - name: Collect BoringCache diagnostics
@@ -427,7 +427,7 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
         run: |
           set -euo pipefail
-          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}"
           ./scripts/collect-boringcache-diagnostics.sh \
             --output-dir "boringcache-diag-${diagnostic_phase}" \
             --workspace "$BENCHMARK_WORKSPACE" \
@@ -445,15 +445,15 @@ jobs:
         if: always() && hashFiles('boringcache-diag-*/**/*') != ''
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}-boringcache
-          path: boringcache-diag-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}-boringcache
+          path: boringcache-diag-${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}
           if-no-files-found: warn
 
       - name: Capture BoringCache session summary
         if: always()
         run: |
           set -euo pipefail
-          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'seed' }}"
+          diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}"
           status_path="boringcache-diag-${diagnostic_phase}/proxy-status-${diagnostic_phase}.json"
           mkdir -p benchmark-session-summary
           if [[ -s "$status_path" ]]; then
@@ -747,7 +747,7 @@ jobs:
           proxy_ready_seconds="${{ steps.warm1_build.outputs.proxy_ready_seconds }}"
           build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
           if [[ -z "${seconds}" || -z "${restore_seconds}" || -z "${proxy_ready_seconds}" || -z "${build_seconds}" ]]; then
-            echo "No timing captured for warm1" >&2
+            echo "No timing captured for warm" >&2
             exit 1
           fi
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
@@ -774,7 +774,7 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm1
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm
           path: benchmark-phase/warm1*
           if-no-files-found: error
 
@@ -825,11 +825,11 @@ jobs:
           path: benchmark-phase
           merge-multiple: true
 
-      - name: Download seed native tool stats
+      - name: Download build native tool stats
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-boringcache-seed
+          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-boringcache-build
           path: benchmark-native-tool
 
       - name: Download BoringCache session summary
@@ -907,8 +907,8 @@ jobs:
           native_tool_args=()
           if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-stats.txt)
-          elif [[ -s benchmark-native-tool/seed-sccache-stats.txt ]]; then
-            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/seed-sccache-stats.txt)
+          elif [[ -s benchmark-native-tool/build-sccache-stats.txt ]]; then
+            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/build-sccache-stats.txt)
           fi
 
           ./scripts/write-benchmark-artifacts.sh \
@@ -925,7 +925,7 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm1 follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm1 restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
             "${cache_summary_args[@]}" \
             "${native_tool_args[@]}"
 

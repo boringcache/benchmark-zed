@@ -103,13 +103,13 @@ jobs:
           if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
             cache_scope="${BENCHMARK_ID}-rolling-${ref_slug}"
             cache_key_prefix="depot-deps-${BENCHMARK_ID}-rolling-${ref_slug}"
-            cache_key_primary="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed1"
-            cache_key_fallback="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-seed2"
+            cache_key_primary="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-build1"
+            cache_key_fallback="${cache_key_prefix}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}-build2"
           else
             cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
             cache_key_prefix="depot-deps-${cache_scope}"
-            cache_key_primary="depot-deps-${cache_scope}-seed1"
-            cache_key_fallback="depot-deps-${cache_scope}-seed2"
+            cache_key_primary="depot-deps-${cache_scope}-build1"
+            cache_key_fallback="depot-deps-${cache_scope}-build2"
           fi
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
@@ -217,7 +217,7 @@ jobs:
           echo "Cannot produce reliable Depot sccache benchmark results until dependency cache writes are enabled." >&2
           exit 1
 
-      - name: Start seed timing
+      - name: Start build timing
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
@@ -261,31 +261,31 @@ jobs:
 
           phase_start="${{ steps.seed_timing_start.outputs.started_at }}"
           start="$(date +%s)"
-          stats_file="/tmp/zed-sccache-seed-stats.txt"
-          BENCHMARK_PHASE_LABEL="seed" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
+          stats_file="/tmp/zed-sccache-cold-stats.txt"
+          BENCHMARK_PHASE_LABEL="cold" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Persist seed native tool stats
+      - name: Persist build native tool stats
         if: always()
         run: |
           set -euo pipefail
           mkdir -p benchmark-native-tool
-          stats_file="/tmp/zed-sccache-seed-stats.txt"
+          stats_file="/tmp/zed-sccache-cold-stats.txt"
           if [[ -f "$stats_file" ]]; then
-            cp "$stats_file" benchmark-native-tool/seed-sccache-stats.txt
+            cp "$stats_file" benchmark-native-tool/build-sccache-stats.txt
           fi
 
-      - name: Upload seed native tool stats
+      - name: Upload build native tool stats
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-depot-cache-seed
-          path: benchmark-native-tool/seed-sccache-stats.txt
+          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-depot-cache-build
+          path: benchmark-native-tool/build-sccache-stats.txt
           if-no-files-found: ignore
 
-      - name: Save seeded cache (primary key)
+      - name: Save build cache (primary key)
         id: save_seed_primary
         continue-on-error: true
         uses: actions/cache/save@v5
@@ -295,7 +295,7 @@ jobs:
             ~/.cargo/git
           key: ${{ steps.scope.outputs.cache_key_primary }}
 
-      - name: Save seeded cache (fallback key)
+      - name: Save build cache (fallback key)
         id: save_seed_fallback
         if: steps.save_seed_primary.outcome != 'success'
         continue-on-error: true
@@ -306,7 +306,7 @@ jobs:
             ~/.cargo/git
           key: ${{ steps.scope.outputs.cache_key_fallback }}
 
-      - name: Resolve seeded cache key
+      - name: Resolve build cache key
         id: seed_cache_key
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -331,14 +331,14 @@ jobs:
           done
 
           if [[ -z "$key" ]]; then
-            echo "Failed to verify seeded cache key in GitHub Actions Cache API (likely cache save/read-only budget issue)." >&2
+            echo "Failed to verify build cache key in GitHub Actions Cache API (likely cache save/read-only budget issue)." >&2
             echo "Primary save outcome: ${{ steps.save_seed_primary.outcome }}" >&2
             echo "Fallback save outcome: ${{ steps.save_seed_fallback.outcome }}" >&2
             exit 1
           fi
 
           echo "key=${key}" >> "$GITHUB_OUTPUT"
-          echo "Using seeded cache key: ${key}"
+          echo "Using build cache key: ${key}"
 
 
   scenario-builds:
@@ -398,8 +398,8 @@ jobs:
         run: |
           set -euo pipefail
           cache_scope="${BENCHMARK_ID}-run-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
-          cache_key_primary="depot-deps-${cache_scope}-seed1"
-          cache_key_fallback="depot-deps-${cache_scope}-seed2"
+          cache_key_primary="depot-deps-${cache_scope}-build1"
+          cache_key_fallback="depot-deps-${cache_scope}-build2"
           scope_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
           echo "cache_key_primary=${cache_key_primary}" >> "$GITHUB_OUTPUT"
@@ -499,7 +499,7 @@ jobs:
           seconds="${{ steps.warm1_build.outputs.seconds }}"
           build_seconds="${{ steps.warm1_build.outputs.build_seconds }}"
           if [[ -z "${seconds}" ]]; then
-            echo "No timing captured for warm1" >&2
+            echo "No timing captured for warm" >&2
             exit 1
           fi
           echo "seconds=${seconds}" >> "$GITHUB_OUTPUT"
@@ -520,7 +520,7 @@ jobs:
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-warm1
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-warm
           path: benchmark-phase/warm1*
           if-no-files-found: error
 
@@ -544,11 +544,11 @@ jobs:
           pattern: benchmark-phase-${{ env.BENCHMARK_ID }}-depot-cache-*
           path: benchmark-phase
           merge-multiple: true
-      - name: Download seed native tool stats
+      - name: Download build native tool stats
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
-          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-depot-cache-seed
+          name: benchmark-native-tool-${{ env.BENCHMARK_ID }}-depot-cache-build
           path: benchmark-native-tool
       - name: Collect scenario timings
         if: ${{ inputs.cache_lane != 'rolling' }}
@@ -601,8 +601,8 @@ jobs:
           native_tool_args=()
           if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-stats.txt)
-          elif [[ -s benchmark-native-tool/seed-sccache-stats.txt ]]; then
-            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/seed-sccache-stats.txt)
+          elif [[ -s benchmark-native-tool/build-sccache-stats.txt ]]; then
+            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/build-sccache-stats.txt)
           fi
 
           ./scripts/write-benchmark-artifacts.sh \
@@ -622,7 +622,7 @@ jobs:
             --mode sccache \
             --adapter sccache \
             --api-url "https://cache.depot.dev" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior dependency cache available through actions/cache and Depot Cache configured as the remote sccache WebDAV backend; warm1 follow-up runs are intentionally skipped. Depot Cache does not expose a run-scoped purge/key namespace through the sccache integration, so prior org sccache state may affect the sample.' || 'Fresh lane: the cold build starts from empty local cargo and sccache state, configures sccache with SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev, and saves only cargo registry/git dependency state through actions/cache. Warm1 restores only those cargo dependencies on a fresh runner and rebuilds the same pinned source tree against Depot Cache for compiler outputs.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior dependency cache available through actions/cache and Depot Cache configured as the remote sccache WebDAV backend; warm follow-up runs are intentionally skipped. Depot Cache does not expose a run-scoped purge/key namespace through the sccache integration, so prior org sccache state may affect the sample.' || 'Fresh lane: the cold build starts from empty local cargo and sccache state, configures sccache with SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev, and saves only cargo registry/git dependency state through actions/cache. Warm restores only those cargo dependencies on a fresh runner and rebuilds the same pinned source tree against Depot Cache for compiler outputs.' }}" \
             "${native_tool_args[@]}"
 
       - name: Upload benchmark artifacts
