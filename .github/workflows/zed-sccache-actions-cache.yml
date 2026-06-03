@@ -434,13 +434,13 @@ jobs:
         id: scenario_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Reset build state for warm build 1
+      - name: Reset build state for warm build
         run: |
           set -euo pipefail
           rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
 
-      - name: Restore cache for warm build 1
+      - name: Restore cache for warm build
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -450,7 +450,7 @@ jobs:
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
-      - name: Run warm build 1
+      - name: Run warm build
         id: warm1_build
         run: |
           set -euo pipefail

@@ -692,7 +692,7 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Run warm build 1
+      - name: Run warm build
         id: warm1_build
         run: |
           set -euo pipefail
