@@ -32,7 +32,6 @@ env:
   PROJECT_REPO: zed-industries/zed
   BENCHMARK_ID: zed-sccache
   BENCHMARK_WORKSPACE: ${{ github.repository }}
-  CLI_RUST_VERSION: "1.93"
   PROJECT_RUST_VERSION: "1.95.0"
 
 jobs:

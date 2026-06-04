@@ -2,19 +2,6 @@ name: "Rolling Benchmark Dispatch"
 
 on:
   workflow_dispatch:
-    inputs:
-      blob_download_concurrency:
-        description: "Optional BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY override for the BoringCache run"
-        required: false
-        type: string
-      blob_prefetch_concurrency:
-        description: "Optional BORINGCACHE_BLOB_PREFETCH_CONCURRENCY override for the BoringCache run"
-        required: false
-        type: string
-      oci_stream_through_min_bytes:
-        description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES for Docker/OCI BoringCache runs"
-        required: false
-        type: string
   push:
     branches:
       - main
@@ -41,6 +28,3 @@ jobs:
         run: >-
           gh workflow run "zed-sccache-benchmark.yml" --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}"
           -f cache_lane=rolling
-          -f blob_download_concurrency="${{ inputs.blob_download_concurrency || '' }}"
-          -f blob_prefetch_concurrency="${{ inputs.blob_prefetch_concurrency || '' }}"
-          -f oci_stream_through_min_bytes="${{ inputs.oci_stream_through_min_bytes || '' }}"

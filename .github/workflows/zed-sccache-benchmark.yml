@@ -13,22 +13,6 @@ on:
         options:
           - fresh
           - rolling
-      cli_ref:
-        description: "Internal benchmark diagnostic only: build this boringcache/cli ref instead of using the released CLI"
-        required: false
-        type: string
-      blob_download_concurrency:
-        description: "Optional BORINGCACHE_BLOB_DOWNLOAD_CONCURRENCY override (blank = adaptive)"
-        required: false
-        type: string
-      blob_prefetch_concurrency:
-        description: "Optional BORINGCACHE_BLOB_PREFETCH_CONCURRENCY override (blank = match download concurrency)"
-        required: false
-        type: string
-      oci_stream_through_min_bytes:
-        description: "Optional BORINGCACHE_OCI_STREAM_THROUGH_MIN_BYTES (Docker/OCI only; blank = disabled)"
-        required: false
-        type: string
   schedule:
     - cron: "0 4 * * 5"
   pull_request:
@@ -67,8 +51,4 @@ jobs:
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
-      cli_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.cli_ref || '' }}
-      blob_download_concurrency: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_download_concurrency || '' }}
-      blob_prefetch_concurrency: ${{ github.event_name == 'workflow_dispatch' && inputs.blob_prefetch_concurrency || '' }}
-      oci_stream_through_min_bytes: ${{ github.event_name == 'workflow_dispatch' && inputs.oci_stream_through_min_bytes || '' }}
     secrets: inherit
