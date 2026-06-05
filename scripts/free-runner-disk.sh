@@ -5,6 +5,17 @@ echo "::group::Disk before cleanup"
 df -h / /home /mnt 2>/dev/null || true
 echo "::endgroup::"
 
+required_gb="${BORINGCACHE_MIN_FREE_DISK_GB:-45}"
+available_kb="$(df -Pk / | awk 'NR == 2 { print $4 }')"
+required_kb=$((required_gb * 1024 * 1024))
+if (( available_kb >= required_kb )); then
+  echo "Free disk is already at least ${required_gb}GiB; skipping cleanup."
+  docker system df || true
+  exit 0
+fi
+
+echo "Free disk below ${required_gb}GiB; reclaiming hosted-runner tool caches."
+
 sudo rm -rf \
   /usr/local/lib/android \
   /usr/share/dotnet \
