@@ -21,7 +21,6 @@ on:
       - ".github/workflows/zed-sccache-benchmark.yml"
       - ".github/workflows/zed-sccache-actions-cache.yml"
       - ".github/workflows/zed-sccache-boringcache.yml"
-      - ".github/workflows/zed-sccache-depot-cache.yml"
       - "README.md"
       - "scenarios/**"
       - "scripts/**"
@@ -35,13 +34,6 @@ jobs:
   github-actions-cache:
     name: GHA
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
-    with:
-      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
-    secrets: inherit
-
-  depot-cache:
-    name: Depot
-    uses: ./.github/workflows/zed-sccache-depot-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
