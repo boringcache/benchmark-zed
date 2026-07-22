@@ -1,6 +1,6 @@
 name: "Zed sccache Benchmark"
 run-name: >-
-  ${{ format('Benchmark {0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling' && 'Rolling' || 'Fresh', github.event_name == 'schedule' && 'Scheduled' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('Benchmark {0} | {1}', github.event_name == 'workflow_dispatch' && inputs.cli_version != '' && 'Canary' || (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.cache_lane == 'rolling')) && 'Rolling' || 'Fresh', github.event_name == 'push' && 'Upstream update' || github.event_name == 'schedule' && 'Weekly' || github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -13,6 +13,17 @@ on:
         options:
           - fresh
           - rolling
+      cli_version:
+        description: "Optional BoringCache CLI release tag for canary runs."
+        required: false
+        type: string
+        default: ""
+  push:
+    branches:
+      - main
+    paths:
+      - ".gitmodules"
+      - "upstream"
   schedule:
     - cron: "0 4 * * 5"
   pull_request:
@@ -35,12 +46,13 @@ jobs:
     name: GHA
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
     with:
-      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+      cache_lane: ${{ github.event_name == 'push' && 'rolling' || github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
     secrets: inherit
 
   boringcache:
     name: BC
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
-      cache_lane: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+      cache_lane: ${{ github.event_name == 'push' && 'rolling' || github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
+      cli_version: ${{ inputs.cli_version }}
     secrets: inherit

@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: fresh
+      cli_version:
+        description: "Optional BoringCache CLI release tag for canary runs."
+        required: false
+        type: string
+        default: ""
 concurrency:
   group: zed-sccache-boringcache-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
@@ -76,6 +81,7 @@ jobs:
         uses: boringcache/one@v1
         with:
           setup: mise
+          cli-version: ${{ inputs.cli_version }}
           mode: rust-sccache
           tools: rust@${{ env.PROJECT_RUST_VERSION }}
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
@@ -189,6 +195,7 @@ jobs:
         uses: boringcache/one@v1
         with:
           setup: mise
+          cli-version: ${{ inputs.cli_version }}
           mode: rust-sccache
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           working-directory: ./upstream
@@ -357,6 +364,7 @@ jobs:
         uses: boringcache/one@v1
         with:
           setup: mise
+          cli-version: ${{ inputs.cli_version }}
           mode: rust-sccache
           tools: rust@${{ env.PROJECT_RUST_VERSION }}
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
@@ -467,6 +475,7 @@ jobs:
         uses: boringcache/one@v1
         with:
           setup: mise
+          cli-version: ${{ inputs.cli_version }}
           mode: rust-sccache
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           working-directory: ./upstream
@@ -610,6 +619,7 @@ jobs:
         uses: boringcache/one@v1
         with:
           setup: none
+          cli-version: ${{ inputs.cli_version }}
           mode: archive
           workspace: ${{ env.BENCHMARK_WORKSPACE }}
           cache-runtime: false

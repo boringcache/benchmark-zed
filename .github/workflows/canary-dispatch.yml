@@ -1,0 +1,31 @@
+name: "Canary Benchmark"
+run-name: ${{ format('Canary | CLI {0}', inputs.cli_version) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: "BoringCache CLI release tag to test."
+        required: true
+        type: string
+        default: vcli-canary
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Run Zed canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch isolated fresh benchmark
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLI_VERSION: ${{ inputs.cli_version }}
+        run: >-
+          gh workflow run zed-sccache-benchmark.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "${{ github.ref_name }}"
+          -f cache_lane=fresh
+          -f "cli_version=${CLI_VERSION}"
