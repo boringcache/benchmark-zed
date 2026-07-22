@@ -34,10 +34,9 @@ jobs:
             exit 1
           fi
 
-          RUN_URL="$(gh workflow run zed-sccache-benchmark.yml \
+          RUN_URL="$(gh workflow run zed-sccache-fresh-benchmark.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref "${{ github.ref_name }}" \
-            -f cache_lane=fresh \
             -f "cli_version=${CLI_VERSION}")"
           RUN_ID="${RUN_URL##*/}"
           echo "Canary benchmark: ${RUN_URL}"
