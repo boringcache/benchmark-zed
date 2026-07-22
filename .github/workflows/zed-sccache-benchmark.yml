@@ -54,5 +54,5 @@ jobs:
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
       cache_lane: ${{ github.event_name == 'push' && 'rolling' || github.event_name == 'workflow_dispatch' && inputs.cache_lane || 'fresh' }}
-      cli_version: ${{ inputs.cli_version || vars.BORINGCACHE_BENCHMARK_CLI_VERSION || 'v1.13.93' }}
+      cli_version: ${{ inputs.cli_version }}
     secrets: inherit
