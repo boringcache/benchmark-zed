@@ -1,14 +1,14 @@
 name: "Canary Benchmark"
-run-name: ${{ format('Canary | CLI {0}', inputs.cli_version) }}
+run-name: ${{ format('Canary | CLI {0}', inputs.cli_version || 'latest immutable') }}
 
 on:
   workflow_dispatch:
     inputs:
       cli_version:
-        description: "BoringCache CLI release tag to test."
-        required: true
+        description: "Exact BoringCache CLI release tag. Empty selects the newest immutable CLI canary."
+        required: false
         type: string
-        default: vcli-canary
+        default: ""
 
 permissions:
   actions: write
@@ -23,9 +23,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CLI_VERSION: ${{ inputs.cli_version }}
-        run: >-
-          gh workflow run zed-sccache-benchmark.yml
-          --repo "$GITHUB_REPOSITORY"
-          --ref "${{ github.ref_name }}"
-          -f cache_lane=fresh
-          -f "cli_version=${CLI_VERSION}"
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$CLI_VERSION" ]]; then
+            CLI_VERSION="$(gh release list --repo boringcache/cli --limit 100 --json tagName,publishedAt --jq '[.[] | select(.tagName | startswith("vcli-canary-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')"
+          fi
+          if [[ -z "$CLI_VERSION" || "$CLI_VERSION" == "null" ]]; then
+            echo "::error::No immutable BoringCache CLI canary release was found."
+            exit 1
+          fi
+
+          RUN_URL="$(gh workflow run zed-sccache-benchmark.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "${{ github.ref_name }}" \
+            -f cache_lane=fresh \
+            -f "cli_version=${CLI_VERSION}")"
+          RUN_ID="${RUN_URL##*/}"
+          echo "Canary benchmark: ${RUN_URL}"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
