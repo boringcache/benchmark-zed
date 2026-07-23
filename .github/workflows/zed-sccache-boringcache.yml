@@ -103,7 +103,8 @@ jobs:
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
           if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
-            cache_tag_prefix="${BENCHMARK_ID}-rolling-${ref_slug}"
+            # v2 retires a legacy archive whose CACHEDIR.TAG mode cannot be restored by current clients.
+            cache_tag_prefix="${BENCHMARK_ID}-v2-rolling-${ref_slug}"
           else
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
@@ -386,7 +387,8 @@ jobs:
           ref_slug="${ref_slug%-}"
           ref_slug="${ref_slug:-main}"
           if [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" ]]; then
-            cache_tag_prefix="${BENCHMARK_ID}-rolling-${ref_slug}"
+            # Keep the warm scope aligned with the seed scope if rolling warm runs are enabled later.
+            cache_tag_prefix="${BENCHMARK_ID}-v2-rolling-${ref_slug}"
           else
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
