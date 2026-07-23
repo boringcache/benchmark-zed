@@ -144,7 +144,7 @@ write_storage_breakdown() {
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
 
-    local key tag requested_tag inspect_target inspect_json
+    local key tag requested_tag cache_type kv_entry_count kv_total_size inspect_target inspect_json
     key="$(jq -r '.cache_entry_id // .cacheEntryId // .manifest_root_digest // .manifestRootDigest // .requested_tag // .requestedTag // .tag // "unknown"' <<<"$row")"
     if [[ -n "${seen_breakdown_entries[$key]+x}" ]]; then
       continue
@@ -154,6 +154,34 @@ write_storage_breakdown() {
     tag="$(jq -r '.tag // .requested_tag // .requestedTag // empty' <<<"$row")"
     requested_tag="$(jq -r '.requested_tag // .requestedTag // .tag // empty' <<<"$row")"
     [[ -n "$tag" ]] || continue
+
+    cache_type="$(jq -r '.cache_type // .cacheType // empty' <<<"$row")"
+    kv_entry_count="$(jq -r '.kv_entry_count // .kvEntryCount // 0' <<<"$row")"
+    kv_total_size="$(jq -r '.kv_total_size // .kvTotalSize // 0' <<<"$row")"
+    kv_entry_count="$(to_num "$kv_entry_count")"
+    kv_total_size="$(to_num "$kv_total_size")"
+    if [[ "$cache_type" == "kv" ]]; then
+      jq -c -n \
+        --arg tag "$tag" \
+        --arg requested_tag "$requested_tag" \
+        --argjson entry_count "$kv_entry_count" \
+        --argjson bytes "$kv_total_size" \
+        '{
+          tag: $tag,
+          requested_tag: $requested_tag,
+          cache_entry_id: null,
+          primary_tag: null,
+          storage_mode: "kv",
+          component_type: "remote_cas",
+          component_label: "remote tool cache",
+          entry_count: $entry_count,
+          bytes: $bytes,
+          archive_size_bytes: 0,
+          blob_total_size_bytes: $bytes
+        }' >> "$components_file"
+      continue
+    fi
+
     inspect_target="$(jq -r '.cache_entry_id // .cacheEntryId // empty' <<<"$row")"
     inspect_target="${inspect_target:-$tag}"
 
@@ -313,7 +341,7 @@ if (( soft_missing_mode == 1 )); then
 
     key="$(jq -r '.cache_entry_id // .cacheEntryId // .manifest_root_digest // .manifestRootDigest // .requested_tag // .requestedTag // .tag // "unknown"' <<<"$row")"
     tag="$(jq -r '.tag // .requested_tag // .requestedTag // empty' <<<"$row")"
-    size="$(jq -r '.compressed_size // .compressedSize // .size_bytes // .sizeBytes // .size // 0' <<<"$row")"
+    size="$(jq -r '.kv_total_size // .kvTotalSize // .compressed_size // .compressedSize // .size_bytes // .sizeBytes // .size // 0' <<<"$row")"
     size="$(to_num "$size")"
 
     if [[ "$size" == "0" && -n "$tag" ]]; then
@@ -362,6 +390,8 @@ else
         | {
             key: dedupe_key,
             size: (
+              .kv_total_size //
+              .kvTotalSize //
               .compressed_size //
               .compressedSize //
               .size_bytes //
