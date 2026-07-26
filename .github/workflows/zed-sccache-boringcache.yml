@@ -208,6 +208,7 @@ jobs:
           sccache-mode: proxy
           sccache-version: 0.14.0
           proxy-port: 5000
+          fail-on-cache-error: ${{ inputs.cache_lane == 'fresh' }}
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
@@ -597,6 +598,13 @@ jobs:
           if [[ -f "$stats_file" ]]; then
             cp "$stats_file" "benchmark-phase/warm1-sccache-stats.txt"
           fi
+          status_path="boringcache-diag-warm/proxy-status-warm.json"
+          if [[ -s "$status_path" ]]; then
+            jq -c '.session_summary // empty' "$status_path" > "benchmark-phase/warm1-session-summary.json" || true
+          fi
+          if [[ ! -s benchmark-phase/warm1-session-summary.json ]]; then
+            rm -f benchmark-phase/warm1-session-summary.json
+          fi
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
@@ -713,7 +721,9 @@ jobs:
           BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           cache_summary_args=()
-          if [[ -s benchmark-session-summary/benchmark-session-summary.json ]]; then
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-session-summary.json ]]; then
+            cache_summary_args=(--cache-session-summary-json benchmark-phase/warm1-session-summary.json)
+          elif [[ "${{ inputs.cache_lane || 'fresh' }}" == "rolling" && -s benchmark-session-summary/benchmark-session-summary.json ]]; then
             cache_summary_args=(--cache-session-summary-json benchmark-session-summary/benchmark-session-summary.json)
           fi
           native_tool_args=()
