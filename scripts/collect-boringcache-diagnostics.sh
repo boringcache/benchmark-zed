@@ -119,11 +119,6 @@ if [[ -d "$HOME/.boringcache" ]]; then
   find "$HOME/.boringcache" -maxdepth 6 -type f | sort > "${output_dir}/boringcache-files.txt" || true
 fi
 
-request_metrics="${HOME}/.boringcache/logs/cache-registry-request-metrics.jsonl"
-if [[ -f "$request_metrics" ]]; then
-  cp "$request_metrics" "${output_dir}/cache-registry-request-metrics.jsonl"
-fi
-
 if [[ -n "$proxy_port" ]]; then
   proxy_status="${output_dir}/proxy-status-${phase}.json"
   proxy_status_stderr="${output_dir}/proxy-status-${phase}.stderr.txt"
