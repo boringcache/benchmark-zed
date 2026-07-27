@@ -99,6 +99,8 @@ jobs:
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
 
+          ./scripts/scope-boringcache-run.sh "$cache_tag_prefix"
+
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
           echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
 
@@ -195,6 +197,7 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
 
       - name: Capture resolved BoringCache tags
         id: resolved_seed_tags
@@ -366,6 +369,8 @@ jobs:
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
 
+          ./scripts/scope-boringcache-run.sh "$cache_tag_prefix"
+
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
           echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
 
@@ -458,6 +463,7 @@ jobs:
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
 
       - name: Capture resolved BoringCache tags
         id: resolved_scenario_tags
@@ -493,6 +499,11 @@ jobs:
           start="$(date +%s)"
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
           BENCHMARK_PHASE_LABEL="warm" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
+          cache_hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' "$stats_file")"
+          if [[ "${cache_hits:-0}" -lt 1 ]]; then
+            echo "Warm sccache build produced zero native cache hits" >&2
+            exit 1
+          fi
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"

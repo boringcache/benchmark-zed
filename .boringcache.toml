@@ -10,4 +10,6 @@ workspace = "boringcache/benchmark-zed"
 # fix), declare the entries here and add cache-profiles to the workflow.
 
 [adapters.sccache]
-tag = "zed-sccache"
+tag = "zed-sccache-local"
+no-platform = true
+no-git = true
