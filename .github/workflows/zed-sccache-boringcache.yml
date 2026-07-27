@@ -208,6 +208,7 @@ jobs:
           sccache-mode: proxy
           sccache-version: 0.14.0
           proxy-port: 5000
+          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
           fail-on-cache-error: ${{ inputs.cache_lane == 'fresh' }}
           verbose: true
         env:
