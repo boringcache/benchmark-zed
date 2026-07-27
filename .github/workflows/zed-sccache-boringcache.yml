@@ -183,14 +183,14 @@ jobs:
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_seed_setup
-        uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27
+        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: sccache
+          trust-policy: publish
           working-directory: ./upstream
           sccache-version: 0.14.0
-          proxy-port: 5000
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
@@ -447,16 +447,14 @@ jobs:
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_scenario_setup
-        uses: boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27
+        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: sccache
+          trust-policy: restore
           working-directory: ./upstream
-          read-only: true
-          save-policy: off
           sccache-version: 0.14.0
-          proxy-port: 5000
           verbose: true
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
@@ -699,7 +697,7 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || 'Fresh lane: the host workflow installs Rust, then the cold build and warm rerun use the same immutable boringcache/one release in mode=sccache. The CLI-owned repo plan manages cargo archives and proxy-backed sccache state. Warm restores that state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || 'Fresh lane: the host workflow installs Rust, then the cold build and warm rerun use the same immutable boringcache/one release in mode=sccache. This storage-lean row uses pure proxy-backed sccache state and no local-disk archives. Warm restores compilation objects on a fresh runner with trust-policy=restore and rebuilds the same pinned source tree without synthetic mutations.' }}" \
             "${cache_summary_args[@]}" \
             "${native_tool_args[@]}"
 
