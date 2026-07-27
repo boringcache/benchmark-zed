@@ -32,7 +32,7 @@ The story this benchmark is meant to show is:
 - commit-build behavior on normal upstream syncs in the rolling lane
 - storage footprint in each backend
 - cache reuse through native `sccache` remote cache behavior
-- the product-managed `boringcache/one@v1` Rust `sccache` flow rather than benchmark-local proxy wiring
+- the immutable `boringcache/one` Rust `sccache` flow rather than benchmark-local proxy wiring
 - whether BoringCache can pair native `sccache` proxy hits with archived Cargo dependency state cleanly
 
 ## Token Model
@@ -41,4 +41,3 @@ This repo uses split BoringCache tokens as the standard CI shape:
 
 - `BORINGCACHE_RESTORE_TOKEN` for read-only restore and proxy access
 - `BORINGCACHE_SAVE_TOKEN` for trusted write paths
-- `BORINGCACHE_API_TOKEN` only where a single bearer variable is still required for compatibility

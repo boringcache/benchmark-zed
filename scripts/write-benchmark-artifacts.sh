@@ -1060,7 +1060,7 @@ native_tool_payload_from_inputs() {
   local tool="${native_tool_kind:-${adapter:-$mode}}"
   if [[ -n "$stats_path" ]]; then
     case "$tool" in
-      sccache|rust-sccache|"")
+      sccache|"")
         sccache_native_tool_payload_from_stats "$stats_path"
         return
         ;;
@@ -1136,7 +1136,7 @@ collect_default_product_refs() {
   fi
 
   if [[ -z "$action_ref" && "$strategy" == "boringcache" ]]; then
-    action_ref="boringcache/one@v1"
+    action_ref="boringcache/one@9721d419d2c78c0780963d297eb3f81f24641a27"
   fi
 
   if [[ -z "$action_sha" && "$action_ref" =~ ^([^@]+)@(.+)$ ]]; then
@@ -1241,7 +1241,7 @@ session_summary_payload_from_inputs() {
     fi
   fi
 
-  local token="${BORINGCACHE_RESTORE_TOKEN:-${BORINGCACHE_API_TOKEN:-}}"
+  local token="${BORINGCACHE_RESTORE_TOKEN:-}"
   local run_identity="${run_uid:-${GITHUB_RUN_ID:-}}"
   local provider_run_identity="${GITHUB_RUN_ID:-}"
   local display_run_identity=""
