@@ -491,6 +491,7 @@ jobs:
           sccache-mode: proxy
           read-only: true
           save-policy: off
+          save-on-pull-request: ${{ inputs.cache_lane == 'fresh' }}
           sccache-version: 0.14.0
           proxy-port: 5000
           verbose: true
