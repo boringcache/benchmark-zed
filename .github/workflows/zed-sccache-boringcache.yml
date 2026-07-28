@@ -42,8 +42,8 @@ jobs:
     steps:
       - name: Validate BoringCache secrets
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
-          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
         run: |
           set -euo pipefail
           [[ -n "${BORINGCACHE_RESTORE_TOKEN}" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
@@ -77,20 +77,10 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Configure boringcache/one for Rust toolchain
-        uses: boringcache/one@v1
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
-          setup: mise
-          cli-version: ${{ inputs.cli_version }}
-          mode: rust-sccache
-          tools: rust@${{ env.PROJECT_RUST_VERSION }}
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          working-directory: ./upstream
-          cache-runtime: false
-          cache-cargo: false
-          cache-target: false
-          sccache: false
-          verbose: true
+          toolchain: ${{ env.PROJECT_RUST_VERSION }}
 
       - name: Prepare benchmark scope and helpers
         id: scope
@@ -108,6 +98,8 @@ jobs:
           else
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
+
+          ./scripts/scope-boringcache-run.sh "$cache_tag_prefix"
 
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
           echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
@@ -187,31 +179,25 @@ jobs:
             rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           fi
 
-      - name: Capture managed rust-sccache setup start
+      - name: Capture managed sccache setup start
         id: managed_seed_setup_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_seed_setup
-        uses: boringcache/one@v1
+        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
         with:
-          setup: mise
+          setup: none
           cli-version: ${{ inputs.cli_version }}
-          mode: rust-sccache
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          mode: sccache
+          trust-policy: publish
           working-directory: ./upstream
-          cache-tag: ${{ steps.scope.outputs.cache_tag_prefix }}
-          cache-cargo: true
-          cache-target: false
-          tools: rust@${{ env.PROJECT_RUST_VERSION }}
-          sccache: true
-          sccache-mode: proxy
           sccache-version: 0.14.0
-          proxy-port: 5000
           verbose: true
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
-          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
 
       - name: Capture resolved BoringCache tags
         id: resolved_seed_tags
@@ -230,7 +216,7 @@ jobs:
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
           echo "sccache_tag=${{ steps.managed_seed_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
 
-      - name: Capture managed rust-sccache setup timing
+      - name: Capture managed sccache setup timing
         id: managed_seed_setup_timing
         run: |
           set -euo pipefail
@@ -271,7 +257,7 @@ jobs:
       - name: Collect BoringCache diagnostics
         if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           set -euo pipefail
           diagnostic_phase="${{ inputs.cache_lane == 'rolling' && 'rolling' || 'cold' }}"
@@ -328,7 +314,7 @@ jobs:
     steps:
       - name: Validate BoringCache restore secret
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           set -euo pipefail
           [[ -n "${BORINGCACHE_RESTORE_TOKEN}" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
@@ -361,20 +347,10 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Configure boringcache/one for Rust toolchain
-        uses: boringcache/one@v1
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
-          setup: mise
-          cli-version: ${{ inputs.cli_version }}
-          mode: rust-sccache
-          tools: rust@${{ env.PROJECT_RUST_VERSION }}
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          working-directory: ./upstream
-          cache-runtime: false
-          cache-cargo: false
-          cache-target: false
-          sccache: false
-          verbose: true
+          toolchain: ${{ env.PROJECT_RUST_VERSION }}
 
       - name: Prepare benchmark scope and helpers
         id: scope
@@ -392,6 +368,8 @@ jobs:
           else
             cache_tag_prefix="${BENCHMARK_ID}-r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
           fi
+
+          ./scripts/scope-boringcache-run.sh "$cache_tag_prefix"
 
           echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
           echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
@@ -468,32 +446,24 @@ jobs:
           set -euo pipefail
           rm -rf upstream/target "$HOME/.cache/sccache"
 
-      - name: Capture managed rust-sccache setup start
+      - name: Capture managed sccache setup start
         id: managed_scenario_setup_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_scenario_setup
-        uses: boringcache/one@v1
+        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
         with:
-          setup: mise
+          setup: none
           cli-version: ${{ inputs.cli_version }}
-          mode: rust-sccache
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
+          mode: sccache
+          trust-policy: restore
           working-directory: ./upstream
-          cache-tag: ${{ steps.scope.outputs.cache_tag_prefix }}
-          cache-cargo: true
-          cache-target: false
-          tools: rust@${{ env.PROJECT_RUST_VERSION }}
-          sccache: true
-          sccache-mode: proxy
-          read-only: true
-          save-policy: off
           sccache-version: 0.14.0
-          proxy-port: 5000
           verbose: true
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
 
       - name: Capture resolved BoringCache tags
         id: resolved_scenario_tags
@@ -512,7 +482,7 @@ jobs:
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
           echo "sccache_tag=${{ steps.managed_scenario_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
 
-      - name: Capture managed rust-sccache setup timing
+      - name: Capture managed sccache setup timing
         id: managed_scenario_setup_timing
         run: |
           set -euo pipefail
@@ -529,6 +499,11 @@ jobs:
           start="$(date +%s)"
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
           BENCHMARK_PHASE_LABEL="warm" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
+          cache_hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' "$stats_file")"
+          if [[ "${cache_hits:-0}" -lt 1 ]]; then
+            echo "Warm sccache build produced zero native cache hits" >&2
+            exit 1
+          fi
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "proxy_ready_seconds=$(grep '^proxy_ready_seconds=' "$timing_file" | head -n1 | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
@@ -538,7 +513,7 @@ jobs:
       - name: Collect BoringCache diagnostics
         if: always() && hashFiles('scripts/collect-boringcache-diagnostics.sh') != ''
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
@@ -617,15 +592,11 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Install BoringCache CLI with boringcache/one
-        uses: boringcache/one@v1
-        with:
-          setup: none
-          cli-version: ${{ inputs.cli_version }}
-          mode: archive
-          workspace: ${{ env.BENCHMARK_WORKSPACE }}
-          cache-runtime: false
-
+      - name: Install BoringCache CLI
+        run: >-
+          ./scripts/install-boringcache-cli.sh
+          "${{ inputs.cli_version }}"
+          "linux-amd64"
       - name: Verify BoringCache CLI
         run: boringcache --version
 
@@ -682,7 +653,7 @@ jobs:
       - name: Measure BoringCache storage usage
         id: cache_size
         env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN || secrets.BORINGCACHE_API_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_EXACT_TAGS: ${{ needs.seed-cache.outputs.sccache_tag }}
         run: |
           tags_csv="${{ needs.seed-cache.outputs.tags_csv }}"
@@ -710,7 +681,7 @@ jobs:
       - name: Write benchmark artifacts
         id: artifact_files
         env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_API_TOKEN || secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           cache_summary_args=()
           if [[ -s benchmark-session-summary/benchmark-session-summary.json ]]; then
@@ -737,7 +708,7 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || 'Fresh lane: the cold build and warm rerun use boringcache/one@v1 in mode=rust-sccache so the product manages Rust setup, cargo archive restore/save, sccache install, and the proxy-backed remote cache wiring. Warm restores the same run-scoped cargo and sccache state on a fresh runner in read-only mode and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || 'Fresh lane: the host workflow installs Rust, then the cold build and warm rerun use the same immutable boringcache/one release in mode=sccache. This storage-lean row uses pure proxy-backed sccache state and no local-disk archives. Warm restores compilation objects on a fresh runner with trust-policy=restore and rebuilds the same pinned source tree without synthetic mutations.' }}" \
             "${cache_summary_args[@]}" \
             "${native_tool_args[@]}"
 
