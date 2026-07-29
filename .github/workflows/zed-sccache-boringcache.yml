@@ -42,7 +42,6 @@ jobs:
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       sccache_tag: ${{ steps.resolved_seed_tags.outputs.sccache_tag }}
-      target_tag: ${{ steps.resolved_seed_tags.outputs.target_tag }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
       cold_build_seconds: ${{ steps.cold_baseline_build.outputs.build_seconds }}
     steps:
@@ -110,7 +109,6 @@ jobs:
           {
             echo "scope_started_at=${scope_started_at}"
             echo "cache_tag_prefix=${cache_tag_prefix}"
-            echo "target_tag=${cache_tag_prefix}-target"
           } >> "$GITHUB_OUTPUT"
 
           cat > ./run-zed-sccache-phase.sh <<'SH'
@@ -211,21 +209,31 @@ jobs:
 
       - name: Capture resolved BoringCache tags
         id: resolved_seed_tags
+        env:
+          RESOLVED_TAGS: ${{ steps.managed_seed_setup.outputs.resolved-tags }}
+          SCCACHE_TAG: ${{ steps.managed_seed_setup.outputs.sccache-tag }}
         run: |
           set -euo pipefail
           tags=()
-          for tag in \
-            "${{ inputs.cache_target && steps.scope.outputs.target_tag || '' }}" \
-            "${{ steps.managed_seed_setup.outputs.sccache-tag }}"; do
+          while IFS= read -r tag; do
             if [[ -n "$tag" ]]; then
               tags+=("$tag")
             fi
+          done <<< "$RESOLVED_TAGS"
+          sccache_recorded=false
+          for tag in "${tags[@]}"; do
+            if [[ "$tag" == "$SCCACHE_TAG" ]]; then
+              sccache_recorded=true
+              break
+            fi
           done
+          if [[ -n "$SCCACHE_TAG" && "$sccache_recorded" != true ]]; then
+            tags+=("$SCCACHE_TAG")
+          fi
           tags_csv="$(IFS=,; echo "${tags[*]}")"
           {
             echo "tags_csv=${tags_csv}"
-            echo "sccache_tag=${{ steps.managed_seed_setup.outputs.sccache-tag }}"
-            echo "target_tag=${{ inputs.cache_target && steps.scope.outputs.target_tag || '' }}"
+            echo "sccache_tag=${SCCACHE_TAG}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Capture managed sccache setup timing
@@ -324,13 +332,17 @@ jobs:
 
 
   scenario-builds:
-    name: Warm
+    name: Warm / ${{ matrix.variant }}
     needs: seed-cache
     if: ${{ inputs.cache_lane != 'rolling' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(inputs.cache_target && '["sccache-only", "target-sccache"]' || '["sccache-only"]') }}
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=warm
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=${{ matrix.variant }}
     steps:
       - name: Validate BoringCache restore secret
         env:
@@ -394,7 +406,6 @@ jobs:
           {
             echo "scope_started_at=${scope_started_at}"
             echo "cache_tag_prefix=${cache_tag_prefix}"
-            echo "target_tag=${cache_tag_prefix}-target"
           } >> "$GITHUB_OUTPUT"
 
           cat > ./run-zed-sccache-phase.sh <<'SH'
@@ -482,7 +493,7 @@ jobs:
           mode: sccache
           trust-policy: restore
           working-directory: ./upstream
-          cache-profiles: ${{ inputs.cache_target && 'zed-target' || '' }}
+          cache-profiles: ${{ matrix.variant == 'target-sccache' && 'zed-target' || '' }}
           sccache-version: 0.14.0
           verbose: true
         env:
@@ -491,22 +502,33 @@ jobs:
 
       - name: Capture resolved BoringCache tags
         id: resolved_scenario_tags
+        env:
+          RESOLVED_TAGS: ${{ steps.managed_scenario_setup.outputs.resolved-tags }}
+          SCCACHE_TAG: ${{ steps.managed_scenario_setup.outputs.sccache-tag }}
         run: |
           set -euo pipefail
           tags=()
-          for tag in \
-            "${{ inputs.cache_target && steps.scope.outputs.target_tag || '' }}" \
-            "${{ steps.managed_scenario_setup.outputs.sccache-tag }}"; do
+          while IFS= read -r tag; do
             if [[ -n "$tag" ]]; then
               tags+=("$tag")
             fi
+          done <<< "$RESOLVED_TAGS"
+          sccache_recorded=false
+          for tag in "${tags[@]}"; do
+            if [[ "$tag" == "$SCCACHE_TAG" ]]; then
+              sccache_recorded=true
+              break
+            fi
           done
+          if [[ -n "$SCCACHE_TAG" && "$sccache_recorded" != true ]]; then
+            tags+=("$SCCACHE_TAG")
+          fi
           tags_csv="$(IFS=,; echo "${tags[*]}")"
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
-          echo "sccache_tag=${{ steps.managed_scenario_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
+          echo "sccache_tag=${SCCACHE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Require restored target state
-        if: ${{ inputs.cache_target }}
+        if: ${{ matrix.variant == 'target-sccache' }}
         run: |
           set -euo pipefail
           test -d upstream/target
@@ -535,7 +557,7 @@ jobs:
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
           BENCHMARK_PHASE_LABEL="warm" BENCHMARK_TIMING_FILE="$timing_file" BENCHMARK_SCCACHE_STATS_FILE="$stats_file" ./run-zed-sccache-phase.sh warm
           cache_hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' "$stats_file")"
-          if [[ "${cache_hits:-0}" -lt 1 ]]; then
+          if [[ "${{ matrix.variant }}" == "sccache-only" && "${cache_hits:-0}" -lt 1 ]]; then
             echo "Warm sccache build produced zero native cache hits" >&2
             exit 1
           fi
@@ -552,10 +574,10 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/collect-boringcache-diagnostics.sh \
-            --output-dir "boringcache-diag-warm" \
+            --output-dir "boringcache-diag-${{ matrix.variant }}" \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "${{ steps.resolved_scenario_tags.outputs.tags_csv }}" \
-            --phase "warm" \
+            --phase "${{ matrix.variant }}" \
             --cache-tag "${{ steps.resolved_scenario_tags.outputs.sccache_tag }}" \
             --proxy-port "${{ steps.managed_scenario_setup.outputs.proxy-port }}" \
             --proxy-log-path "${{ steps.managed_scenario_setup.outputs.proxy-log-path }}" \
@@ -563,11 +585,11 @@ jobs:
             --cache-label "sccache-cache"
 
       - name: Upload BoringCache diagnostics
-        if: always() && hashFiles('boringcache-diag-warm/**/*') != ''
+        if: always() && hashFiles('boringcache-diag-*/*') != ''
         uses: actions/upload-artifact@v6
         with:
-          name: boringcache-diag-${{ env.BENCHMARK_ID }}-warm-boringcache
-          path: boringcache-diag-warm
+          name: boringcache-diag-${{ env.BENCHMARK_ID }}-${{ matrix.variant }}-boringcache
+          path: boringcache-diag-${{ matrix.variant }}
           if-no-files-found: warn
 
       - name: Capture scenario timing
@@ -595,8 +617,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p benchmark-phase
-          cat > "benchmark-phase/warm1.env" <<EOF
-          phase=warm1
+          cat > "benchmark-phase/warm1-${{ matrix.variant }}.env" <<EOF
+          phase=warm1-${{ matrix.variant }}
           seconds=${{ steps.phase_timing.outputs.seconds }}
           restore_seconds=${{ steps.phase_timing.outputs.restore_seconds }}
           proxy_ready_seconds=${{ steps.phase_timing.outputs.proxy_ready_seconds }}
@@ -605,13 +627,13 @@ jobs:
           EOF
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
           if [[ -f "$stats_file" ]]; then
-            cp "$stats_file" "benchmark-phase/warm1-sccache-stats.txt"
+            cp "$stats_file" "benchmark-phase/warm1-${{ matrix.variant }}-sccache-stats.txt"
           fi
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-warm
-          path: benchmark-phase/warm1*
+          name: benchmark-phase-${{ env.BENCHMARK_ID }}-boringcache-${{ matrix.variant }}
+          path: benchmark-phase/warm1-${{ matrix.variant }}*
           if-no-files-found: error
 
   finalize-benchmark:
@@ -663,7 +685,7 @@ jobs:
           set -euo pipefail
           parse_phase() {
             local phase="$1"
-            local key="${phase//-/_}"
+            local key="$2"
             local file="benchmark-phase/${phase}.env"
             if [[ ! -f "$file" ]]; then
               echo "Missing timing artifact for phase ${phase}" >&2
@@ -684,7 +706,63 @@ jobs:
               echo "${key}_build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
             fi
           }
-          parse_phase warm1
+          if [[ "${{ inputs.cache_target }}" == "true" ]]; then
+            parse_phase warm1-target-sccache warm1
+            parse_phase warm1-sccache-only control
+          else
+            parse_phase warm1-sccache-only warm1
+          fi
+
+      - name: Write controlled target comparison
+        if: ${{ inputs.cache_target }}
+        run: |
+          set -euo pipefail
+          control_seconds="${{ steps.timings.outputs.control_seconds }}"
+          control_build_seconds="${{ steps.timings.outputs.control_build_seconds }}"
+          target_seconds="${{ steps.timings.outputs.warm1_seconds }}"
+          target_build_seconds="${{ steps.timings.outputs.warm1_build_seconds }}"
+          delta_seconds=$((control_seconds - target_seconds))
+          delta_build_seconds=$((control_build_seconds - target_build_seconds))
+          speedup_percent="$(awk -v control="$control_seconds" -v target="$target_seconds" 'BEGIN { if (control > 0) printf "%.1f", ((control - target) * 100) / control; else print "0.0" }')"
+
+          mkdir -p benchmark-comparison
+          jq -n \
+            --argjson control_seconds "$control_seconds" \
+            --argjson control_build_seconds "$control_build_seconds" \
+            --argjson target_seconds "$target_seconds" \
+            --argjson target_build_seconds "$target_build_seconds" \
+            --argjson delta_seconds "$delta_seconds" \
+            --argjson delta_build_seconds "$delta_build_seconds" \
+            --arg speedup_percent "$speedup_percent" \
+            '{
+              schema_version: 1,
+              experiment: "zed-target-plus-sccache",
+              invariant: "one cold seed, one source, one remote sccache population, fresh ubuntu-latest consumers",
+              sccache_only: {wall_seconds: $control_seconds, build_seconds: $control_build_seconds},
+              target_plus_sccache: {wall_seconds: $target_seconds, build_seconds: $target_build_seconds},
+              target_advantage: {wall_seconds: $delta_seconds, build_seconds: $delta_build_seconds, wall_percent: ($speedup_percent | tonumber)}
+            }' > benchmark-comparison/target-sccache.json
+
+          {
+            echo "## Controlled target + sccache comparison"
+            echo
+            echo "Both fresh consumers use the same source and exact cold-seeded remote sccache population. Only the target+sccache consumer restores the target archive."
+            echo
+            echo "| Cache shape | Setup + build | Build only |"
+            echo "|---|---:|---:|"
+            echo "| sccache only | ${control_seconds}s | ${control_build_seconds}s |"
+            echo "| target + sccache | ${target_seconds}s | ${target_build_seconds}s |"
+            echo
+            echo "Target advantage: ${delta_seconds}s (${speedup_percent}%) end to end; ${delta_build_seconds}s in Cargo build."
+          } > benchmark-comparison/target-sccache.md
+
+      - name: Upload controlled target comparison
+        if: ${{ inputs.cache_target }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ env.BENCHMARK_ID }}-target-sccache-control
+          path: benchmark-comparison/target-sccache.*
+          if-no-files-found: error
       - name: Measure BoringCache storage usage
         id: cache_size
         env:
@@ -723,8 +801,10 @@ jobs:
             cache_summary_args=(--cache-session-summary-json benchmark-session-summary/benchmark-session-summary.json)
           fi
           native_tool_args=()
-          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-stats.txt ]]; then
-            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-stats.txt)
+          if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-target-sccache-sccache-stats.txt ]]; then
+            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-target-sccache-sccache-stats.txt)
+          elif [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" && -s benchmark-phase/warm1-sccache-only-sccache-stats.txt ]]; then
+            native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-phase/warm1-sccache-only-sccache-stats.txt)
           elif [[ -s benchmark-native-tool/build-sccache-stats.txt ]]; then
             native_tool_args=(--native-tool sccache --sccache-stats-file benchmark-native-tool/build-sccache-stats.txt)
           fi
@@ -772,6 +852,10 @@ jobs:
       - name: Publish summary
         run: |
           cat "${{ steps.artifact_files.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -s benchmark-comparison/target-sccache.md ]]; then
+            printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            cat benchmark-comparison/target-sccache.md >> "$GITHUB_STEP_SUMMARY"
+          fi
           printf '\n' >> "$GITHUB_STEP_SUMMARY"
           cat "${{ steps.action_timing_report.outputs.md_path }}" >> "$GITHUB_STEP_SUMMARY"
           printf '\n' >> "$GITHUB_STEP_SUMMARY"

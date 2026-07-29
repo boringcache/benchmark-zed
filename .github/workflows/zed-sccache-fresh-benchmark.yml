@@ -25,6 +25,7 @@ permissions:
 jobs:
   github-actions-cache:
     name: GHA
+    if: ${{ !inputs.cache_target }}
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
     with:
       cache_lane: fresh
