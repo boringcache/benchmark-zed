@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ""
+      cache_target:
+        description: "Restore the full Cargo target archive alongside remote sccache."
+        required: false
+        type: boolean
+        default: false
 concurrency:
   group: zed-sccache-boringcache-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
   cancel-in-progress: false
@@ -37,6 +42,7 @@ jobs:
     outputs:
       tags_csv: ${{ steps.resolved_seed_tags.outputs.tags_csv }}
       sccache_tag: ${{ steps.resolved_seed_tags.outputs.sccache_tag }}
+      target_tag: ${{ steps.resolved_seed_tags.outputs.target_tag }}
       cold_seconds: ${{ steps.cold_baseline_build.outputs.seconds }}
       cold_build_seconds: ${{ steps.cold_baseline_build.outputs.build_seconds }}
     steps:
@@ -101,8 +107,11 @@ jobs:
 
           ./scripts/scope-boringcache-run.sh "$cache_tag_prefix"
 
-          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
-          echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
+          {
+            echo "scope_started_at=${scope_started_at}"
+            echo "cache_tag_prefix=${cache_tag_prefix}"
+            echo "target_tag=${cache_tag_prefix}-target"
+          } >> "$GITHUB_OUTPUT"
 
           cat > ./run-zed-sccache-phase.sh <<'SH'
           #!/usr/bin/env bash
@@ -185,13 +194,14 @@ jobs:
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_seed_setup
-        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: sccache
           trust-policy: publish
           working-directory: ./upstream
+          cache-profiles: ${{ inputs.cache_target && 'zed-target' || '' }}
           sccache-version: 0.14.0
           verbose: true
         env:
@@ -205,16 +215,18 @@ jobs:
           set -euo pipefail
           tags=()
           for tag in \
-            "${{ steps.managed_seed_setup.outputs.cargo-tag }}" \
-            "${{ steps.managed_seed_setup.outputs.cargo-git-tag }}" \
+            "${{ inputs.cache_target && steps.scope.outputs.target_tag || '' }}" \
             "${{ steps.managed_seed_setup.outputs.sccache-tag }}"; do
             if [[ -n "$tag" ]]; then
               tags+=("$tag")
             fi
           done
           tags_csv="$(IFS=,; echo "${tags[*]}")"
-          echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
-          echo "sccache_tag=${{ steps.managed_seed_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags_csv=${tags_csv}"
+            echo "sccache_tag=${{ steps.managed_seed_setup.outputs.sccache-tag }}"
+            echo "target_tag=${{ inputs.cache_target && steps.scope.outputs.target_tag || '' }}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Capture managed sccache setup timing
         id: managed_seed_setup_timing
@@ -235,6 +247,14 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Capture target working set
+        if: ${{ inputs.cache_target }}
+        run: |
+          set -euo pipefail
+          target_bytes="$(du -sb upstream/target | cut -f1)"
+          target_files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          echo "Target working set: ${target_bytes} bytes across ${target_files} files"
 
       - name: Persist build native tool stats
         if: always()
@@ -371,8 +391,11 @@ jobs:
 
           ./scripts/scope-boringcache-run.sh "$cache_tag_prefix"
 
-          echo "scope_started_at=${scope_started_at}" >> "$GITHUB_OUTPUT"
-          echo "cache_tag_prefix=${cache_tag_prefix}" >> "$GITHUB_OUTPUT"
+          {
+            echo "scope_started_at=${scope_started_at}"
+            echo "cache_tag_prefix=${cache_tag_prefix}"
+            echo "target_tag=${cache_tag_prefix}-target"
+          } >> "$GITHUB_OUTPUT"
 
           cat > ./run-zed-sccache-phase.sh <<'SH'
           #!/usr/bin/env bash
@@ -452,13 +475,14 @@ jobs:
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_scenario_setup
-        uses: boringcache/one@6b7033721b37075b2138fd0c769bf088e0836ce6 # v1.14.0
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
           mode: sccache
           trust-policy: restore
           working-directory: ./upstream
+          cache-profiles: ${{ inputs.cache_target && 'zed-target' || '' }}
           sccache-version: 0.14.0
           verbose: true
         env:
@@ -471,8 +495,7 @@ jobs:
           set -euo pipefail
           tags=()
           for tag in \
-            "${{ steps.managed_scenario_setup.outputs.cargo-tag }}" \
-            "${{ steps.managed_scenario_setup.outputs.cargo-git-tag }}" \
+            "${{ inputs.cache_target && steps.scope.outputs.target_tag || '' }}" \
             "${{ steps.managed_scenario_setup.outputs.sccache-tag }}"; do
             if [[ -n "$tag" ]]; then
               tags+=("$tag")
@@ -481,6 +504,18 @@ jobs:
           tags_csv="$(IFS=,; echo "${tags[*]}")"
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
           echo "sccache_tag=${{ steps.managed_scenario_setup.outputs.sccache-tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Require restored target state
+        if: ${{ inputs.cache_target }}
+        run: |
+          set -euo pipefail
+          test -d upstream/target
+          target_files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          if [[ "$target_files" -lt 1 ]]; then
+            echo "Target archive restored no files" >&2
+            exit 1
+          fi
+          echo "Restored ${target_files} target files before Cargo started"
 
       - name: Capture managed sccache setup timing
         id: managed_scenario_setup_timing
@@ -708,7 +743,7 @@ jobs:
             --cache-storage-source "boringcache-check" \
             --storage-breakdown-json "${{ steps.cache_size.outputs.breakdown_path }}" \
             --action-timings-json "${{ steps.action_timing_report.outputs.json_path }}" \
-            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || 'Fresh lane: the host workflow installs Rust, then the cold build and warm rerun use the same immutable boringcache/one release in mode=sccache. This storage-lean row uses pure proxy-backed sccache state and no local-disk archives. Warm restores compilation objects on a fresh runner with trust-policy=restore and rebuilds the same pinned source tree without synthetic mutations.' }}" \
+            --hit-behavior-note "${{ inputs.cache_lane == 'rolling' && 'Rolling lane: this run builds the current upstream commit as-is with the prior rolling cache available, exports the updated cache, and records that commit build only; warm follow-up runs are intentionally skipped.' || inputs.cache_target && 'Fresh target+sccache lane: the same immutable boringcache/one v1.15 release restores the full Cargo target profile concurrently with the adapter-owned remote sccache state. Warm runs on a fresh runner with trust-policy=restore and rebuilds the same pinned source tree without synthetic mutations.' || 'Fresh sccache-only lane: the same immutable boringcache/one v1.15 release uses pure adapter-owned remote compiler-cache state and no local-disk archives. Warm runs on a fresh runner with trust-policy=restore and rebuilds the same pinned source tree without synthetic mutations.' }}" \
             "${cache_summary_args[@]}" \
             "${native_tool_args[@]}"
 

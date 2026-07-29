@@ -1,6 +1,6 @@
 name: "Zed sccache Fresh"
 run-name: >-
-  ${{ format('Benchmark {0} | {1}', inputs.cli_version != '' && 'Canary' || 'Fresh', github.event_name == 'schedule' && 'Weekly' || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ format('Benchmark {0}{1} | {2}', inputs.cli_version != '' && 'Canary' || 'Fresh', inputs.cache_target && ' + target' || '', github.event_name == 'schedule' && 'Weekly' || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -10,6 +10,11 @@ on:
         required: false
         type: string
         default: ""
+      cache_target:
+        description: "Restore the full Cargo target archive alongside remote sccache."
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "0 4 * * 5"
 
@@ -31,4 +36,5 @@ jobs:
     with:
       cache_lane: fresh
       cli_version: ${{ inputs.cli_version }}
+      cache_target: ${{ inputs.cache_target }}
     secrets: inherit

@@ -1,13 +1,17 @@
 workspace = "boringcache/benchmark-zed"
 
-# This benchmark uses pure-proxy sccache mode with no local-disk archive
-# entries.
-# Adding ~/.cargo/{registry,git} and ~/.cache/sccache as archives to
-# match what actions/cache restores would balloon the BoringCache
-# storage footprint, and that storage-lean tradeoff is intentional for
-# this row. Keep this file as the canonical config anchor; if a hybrid
-# pivot is later approved (parallel to gRPC's BAZEL_OUTPUT_USER_ROOT
-# fix), declare the entries here and add cache-profiles to the workflow.
+# The default benchmark remains the storage-lean, pure-proxy sccache row.
+# The opt-in target profile measures the product's hybrid path: the portable
+# Cargo target archive restores concurrently with the adapter-owned remote
+# compiler cache. Keeping the profile here makes local and CI behavior share
+# one CLI-owned cache plan.
+
+[entries.zed-target]
+tag = "zed-target-local"
+path = "upstream/target"
+
+[profiles.zed-target]
+entries = ["zed-target"]
 
 [adapters.sccache]
 tag = "zed-sccache-local"
