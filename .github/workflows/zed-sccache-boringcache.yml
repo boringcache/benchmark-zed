@@ -617,6 +617,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p benchmark-phase
+          cpu_model="$(awk -F: '/^model name/ { value=$2; sub(/^[[:space:]]+/, "", value); print value; exit }' /proc/cpuinfo)"
+          logical_cores="$(nproc)"
           cat > "benchmark-phase/warm1-${{ matrix.variant }}.env" <<EOF
           phase=warm1-${{ matrix.variant }}
           seconds=${{ steps.phase_timing.outputs.seconds }}
@@ -624,6 +626,8 @@ jobs:
           proxy_ready_seconds=${{ steps.phase_timing.outputs.proxy_ready_seconds }}
           build_seconds=${{ steps.phase_timing.outputs.build_seconds }}
           end_to_end_seconds=${{ steps.phase_timing.outputs.end_to_end_seconds }}
+          cpu_model=${cpu_model}
+          logical_cores=${logical_cores}
           EOF
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
           if [[ -f "$stats_file" ]]; then
@@ -700,11 +704,13 @@ jobs:
               exit 1
             fi
             echo "${key}_seconds=${seconds}" >> "$GITHUB_OUTPUT"
-            local build_seconds
-            build_seconds="$(grep "^build_seconds=" "$file" | head -n1 | cut -d= -f2- || true)"
-            if [[ -n "${build_seconds}" ]]; then
-              echo "${key}_build_seconds=${build_seconds}" >> "$GITHUB_OUTPUT"
-            fi
+            local field value
+            for field in build_seconds restore_seconds proxy_ready_seconds cpu_model logical_cores; do
+              value="$(grep "^${field}=" "$file" | head -n1 | cut -d= -f2- || true)"
+              if [[ -n "${value}" ]]; then
+                echo "${key}_${field}=${value}" >> "$GITHUB_OUTPUT"
+              fi
+            done
           }
           if [[ "${{ inputs.cache_target }}" == "true" ]]; then
             parse_phase warm1-target-sccache warm1
@@ -719,8 +725,16 @@ jobs:
           set -euo pipefail
           control_seconds="${{ steps.timings.outputs.control_seconds }}"
           control_build_seconds="${{ steps.timings.outputs.control_build_seconds }}"
+          control_restore_seconds="${{ steps.timings.outputs.control_restore_seconds }}"
+          control_proxy_ready_seconds="${{ steps.timings.outputs.control_proxy_ready_seconds }}"
+          control_cpu_model="${{ steps.timings.outputs.control_cpu_model }}"
+          control_logical_cores="${{ steps.timings.outputs.control_logical_cores }}"
           target_seconds="${{ steps.timings.outputs.warm1_seconds }}"
           target_build_seconds="${{ steps.timings.outputs.warm1_build_seconds }}"
+          target_restore_seconds="${{ steps.timings.outputs.warm1_restore_seconds }}"
+          target_proxy_ready_seconds="${{ steps.timings.outputs.warm1_proxy_ready_seconds }}"
+          target_cpu_model="${{ steps.timings.outputs.warm1_cpu_model }}"
+          target_logical_cores="${{ steps.timings.outputs.warm1_logical_cores }}"
           delta_seconds=$((control_seconds - target_seconds))
           delta_build_seconds=$((control_build_seconds - target_build_seconds))
           speedup_percent="$(awk -v control="$control_seconds" -v target="$target_seconds" 'BEGIN { if (control > 0) printf "%.1f", ((control - target) * 100) / control; else print "0.0" }')"
@@ -729,8 +743,16 @@ jobs:
           jq -n \
             --argjson control_seconds "$control_seconds" \
             --argjson control_build_seconds "$control_build_seconds" \
+            --argjson control_restore_seconds "$control_restore_seconds" \
+            --argjson control_proxy_ready_seconds "$control_proxy_ready_seconds" \
+            --arg control_cpu_model "$control_cpu_model" \
+            --argjson control_logical_cores "$control_logical_cores" \
             --argjson target_seconds "$target_seconds" \
             --argjson target_build_seconds "$target_build_seconds" \
+            --argjson target_restore_seconds "$target_restore_seconds" \
+            --argjson target_proxy_ready_seconds "$target_proxy_ready_seconds" \
+            --arg target_cpu_model "$target_cpu_model" \
+            --argjson target_logical_cores "$target_logical_cores" \
             --argjson delta_seconds "$delta_seconds" \
             --argjson delta_build_seconds "$delta_build_seconds" \
             --arg speedup_percent "$speedup_percent" \
@@ -738,8 +760,26 @@ jobs:
               schema_version: 1,
               experiment: "zed-target-plus-sccache",
               invariant: "one cold seed, one source, one remote sccache population, fresh ubuntu-latest consumers",
-              sccache_only: {wall_seconds: $control_seconds, build_seconds: $control_build_seconds},
-              target_plus_sccache: {wall_seconds: $target_seconds, build_seconds: $target_build_seconds},
+              comparability: {
+                cpu_model_matched: ($control_cpu_model == $target_cpu_model),
+                logical_cores_matched: ($control_logical_cores == $target_logical_cores)
+              },
+              sccache_only: {
+                wall_seconds: $control_seconds,
+                restore_seconds: $control_restore_seconds,
+                proxy_ready_seconds: $control_proxy_ready_seconds,
+                build_seconds: $control_build_seconds,
+                cpu_model: $control_cpu_model,
+                logical_cores: $control_logical_cores
+              },
+              target_plus_sccache: {
+                wall_seconds: $target_seconds,
+                restore_seconds: $target_restore_seconds,
+                proxy_ready_seconds: $target_proxy_ready_seconds,
+                build_seconds: $target_build_seconds,
+                cpu_model: $target_cpu_model,
+                logical_cores: $target_logical_cores
+              },
               target_advantage: {wall_seconds: $delta_seconds, build_seconds: $delta_build_seconds, wall_percent: ($speedup_percent | tonumber)}
             }' > benchmark-comparison/target-sccache.json
 
@@ -754,6 +794,12 @@ jobs:
             echo "| target + sccache | ${target_seconds}s | ${target_build_seconds}s |"
             echo
             echo "Target advantage: ${delta_seconds}s (${speedup_percent}%) end to end; ${delta_build_seconds}s in Cargo build."
+            echo
+            echo "CPU cohorts: sccache-only ${control_cpu_model} (${control_logical_cores} cores); target+sccache ${target_cpu_model} (${target_logical_cores} cores)."
+            if [[ "$control_cpu_model" != "$target_cpu_model" ]]; then
+              echo
+              echo "The CPU models differ, so the observed build and end-to-end deltas are not fully attributable to target restoration."
+            fi
           } > benchmark-comparison/target-sccache.md
 
       - name: Upload controlled target comparison
