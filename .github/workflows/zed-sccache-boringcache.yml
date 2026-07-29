@@ -244,6 +244,17 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
+      - name: Initialize Cargo source mtime cache
+        if: ${{ inputs.cache_target }}
+        run: |
+          set -euo pipefail
+          node ./scripts/run-mtime-cache.js ./upstream | tee /tmp/zed-mtime-seed.txt
+          added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' /tmp/zed-mtime-seed.txt)"
+          if [[ "${added:-0}" -lt 1 ]]; then
+            echo "Cargo source mtime cache recorded no source files" >&2
+            exit 1
+          fi
+
       - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
@@ -539,6 +550,18 @@ jobs:
           fi
           echo "Restored ${target_files} target files before Cargo started"
 
+      - name: Restore Cargo source mtimes
+        if: ${{ matrix.variant == 'target-sccache' }}
+        run: |
+          set -euo pipefail
+          node ./scripts/run-mtime-cache.js ./upstream | tee /tmp/zed-mtime-warm.txt
+          restored="$(awk '$1 == "*" && $2 == "restored:" { print $3 }' /tmp/zed-mtime-warm.txt)"
+          invalid="$(awk '$1 == "*" && $2 == "invalid:" { print $3 }' /tmp/zed-mtime-warm.txt)"
+          if [[ "${restored:-0}" -lt 1 || "${invalid:-0}" -ne 0 ]]; then
+            echo "Cargo source mtime restoration was incomplete" >&2
+            exit 1
+          fi
+
       - name: Capture managed sccache setup timing
         id: managed_scenario_setup_timing
         run: |
@@ -632,6 +655,10 @@ jobs:
           stats_file="/tmp/zed-sccache-warm1-stats.txt"
           if [[ -f "$stats_file" ]]; then
             cp "$stats_file" "benchmark-phase/warm1-${{ matrix.variant }}-sccache-stats.txt"
+          fi
+          mtime_file="/tmp/zed-mtime-warm.txt"
+          if [[ -f "$mtime_file" ]]; then
+            cp "$mtime_file" "benchmark-phase/warm1-${{ matrix.variant }}-mtime.txt"
           fi
       - name: Upload scenario timing artifact
         uses: actions/upload-artifact@v6

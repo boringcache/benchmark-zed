@@ -35,6 +35,18 @@ The story this benchmark is meant to show is:
 - the immutable `boringcache/one` Rust `sccache` flow rather than benchmark-local proxy wiring
 - whether BoringCache can pair native `sccache` proxy hits with archived Cargo dependency state cleanly
 
+The opt-in target control restores `target/` concurrently with the remote
+`sccache` population. It also runs Deno's content-keyed mtime-cache algorithm
+before the seed build and again after restore. That preserves Cargo's source
+freshness contract across fresh checkouts: unchanged files regain their seed
+mtimes, while changed files keep a new mtime and rebuild normally. Without
+this ledger, a large target archive can restore successfully while Cargo still
+rejects most of it because the fresh checkout is newer than its fingerprints.
+
+The vendored implementation in `scripts/deno-mtime-cache-action.js` retains
+Deno's MIT copyright header. `scripts/run-mtime-cache.js` only adapts it to the
+nested Zed checkout used by this benchmark.
+
 ## Token Model
 
 This repo uses split BoringCache tokens as the standard CI shape:
