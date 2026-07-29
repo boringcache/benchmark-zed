@@ -184,6 +184,7 @@ jobs:
           rm -rf upstream/target
           if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
             rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+            mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           fi
 
       - name: Capture managed sccache setup start
@@ -489,7 +490,8 @@ jobs:
       - name: Reset local scenario state
         run: |
           set -euo pipefail
-          rm -rf upstream/target "$HOME/.cache/sccache"
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
 
       - name: Capture managed sccache setup start
         id: managed_scenario_setup_start
@@ -537,6 +539,17 @@ jobs:
           tags_csv="$(IFS=,; echo "${tags[*]}")"
           echo "tags_csv=${tags_csv}" >> "$GITHUB_OUTPUT"
           echo "sccache_tag=${SCCACHE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Require restored Cargo dependency state
+        run: |
+          set -euo pipefail
+          registry_files="$(find "$HOME/.cargo/registry" -type f | wc -l | tr -d ' ')"
+          git_files="$(find "$HOME/.cargo/git" -type f | wc -l | tr -d ' ')"
+          if [[ "$registry_files" -lt 1 || "$git_files" -lt 1 ]]; then
+            echo "Cargo dependency archives were not fully restored" >&2
+            exit 1
+          fi
+          echo "Restored ${registry_files} Cargo registry files and ${git_files} Cargo git files before Cargo started"
 
       - name: Require restored target state
         if: ${{ matrix.variant == 'target-sccache' }}
@@ -786,7 +799,7 @@ jobs:
             '{
               schema_version: 1,
               experiment: "zed-target-plus-sccache",
-              invariant: "one cold seed, one source, one remote sccache population, fresh ubuntu-latest consumers",
+              invariant: "one cold seed, one source, one Cargo dependency state, one remote sccache population, fresh ubuntu-latest consumers",
               comparability: {
                 cpu_model_matched: ($control_cpu_model == $target_cpu_model),
                 logical_cores_matched: ($control_logical_cores == $target_logical_cores)
@@ -813,12 +826,12 @@ jobs:
           {
             echo "## Controlled target + sccache comparison"
             echo
-            echo "Both fresh consumers use the same source and exact cold-seeded remote sccache population. Only the target+sccache consumer restores the target archive."
+            echo "Both fresh consumers use the same source, Cargo dependency archives, and exact cold-seeded remote sccache population. Only the target+sccache consumer restores the target archive."
             echo
             echo "| Cache shape | Setup + build | Build only |"
             echo "|---|---:|---:|"
-            echo "| sccache only | ${control_seconds}s | ${control_build_seconds}s |"
-            echo "| target + sccache | ${target_seconds}s | ${target_build_seconds}s |"
+            echo "| Cargo deps + sccache | ${control_seconds}s | ${control_build_seconds}s |"
+            echo "| Cargo deps + target + sccache | ${target_seconds}s | ${target_build_seconds}s |"
             echo
             echo "Target advantage: ${delta_seconds}s (${speedup_percent}%) end to end; ${delta_build_seconds}s in Cargo build."
             echo

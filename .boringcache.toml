@@ -1,19 +1,32 @@
 workspace = "boringcache/benchmark-zed"
 
-# The default benchmark remains the storage-lean, pure-proxy sccache row.
-# The opt-in target profile measures the product's hybrid path: the portable
-# Cargo target archive restores concurrently with the adapter-owned remote
-# compiler cache. Keeping the profile here makes local and CI behavior share
-# one CLI-owned cache plan.
+# Cargo's registry and git sources are common dependency state, not compiler
+# outputs. Keep them in the adapter's default profile so both the pure sccache
+# and target+sccache lanes compare the same build state as actions/cache.
+
+[entries.cargo-registry]
+tag = "zed-cargo-registry-local"
+
+[entries.cargo-git]
+tag = "zed-cargo-git-local"
+
+[profiles.cargo-deps]
+entries = ["cargo-registry", "cargo-git"]
+
+# The opt-in target profile adds the portable Cargo build graph. Adapter-owned
+# sccache and Cargo dependency state remain shared by both consumers.
 
 [entries.zed-target]
 tag = "zed-target-local"
 path = "upstream/target"
 
 [profiles.zed-target]
-entries = ["zed-target"]
+# Explicit Action profiles replace the adapter default, so keep the common
+# dependency entries in the target shape as well.
+entries = ["cargo-registry", "cargo-git", "zed-target"]
 
 [adapters.sccache]
 tag = "zed-sccache-local"
 no-platform = true
 no-git = true
+profiles = ["cargo-deps"]

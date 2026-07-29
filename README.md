@@ -35,9 +35,11 @@ The story this benchmark is meant to show is:
 - the immutable `boringcache/one` Rust `sccache` flow rather than benchmark-local proxy wiring
 - whether BoringCache can pair native `sccache` proxy hits with archived Cargo dependency state cleanly
 
-The opt-in target control restores `target/` concurrently with the remote
-`sccache` population. It also runs Deno's content-keyed mtime-cache algorithm
-before the seed build and again after restore. That preserves Cargo's source
+Both BoringCache consumers restore Cargo registry and git dependency archives
+alongside the remote `sccache` population, matching the state restored by the
+Actions/cache control. The opt-in target consumer additionally restores
+`target/` concurrently. It runs Deno's content-keyed mtime-cache algorithm
+before the seed build and again after restore, preserving Cargo's source
 freshness contract across fresh checkouts: unchanged files regain their seed
 mtimes, while changed files keep a new mtime and rebuild normally. Without
 this ledger, a large target archive can restore successfully while Cargo still
