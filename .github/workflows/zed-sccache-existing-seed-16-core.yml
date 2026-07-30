@@ -224,7 +224,7 @@ jobs:
       - name: Verify exact restored state
         id: restore_state
         env:
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           RESOLVED_TAGS: ${{ steps.restore_release.outputs.resolved-tags || steps.restore_override.outputs.resolved-tags }}
           RESOLVED_SCCACHE_TAG: ${{ steps.restore_release.outputs.sccache-tag || steps.restore_override.outputs.sccache-tag }}
           CACHE_HIT: ${{ steps.restore_release.outputs.cache-hit || steps.restore_override.outputs.cache-hit }}
@@ -422,7 +422,6 @@ jobs:
         if: always()
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-          BORINGCACHE_API_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           RESOLVED_TAGS: ${{ steps.restore_release.outputs.resolved-tags || steps.restore_override.outputs.resolved-tags }}
           RESOLVED_SCCACHE_TAG: ${{ steps.restore_release.outputs.sccache-tag || steps.restore_override.outputs.sccache-tag }}
           PROXY_PORT: ${{ steps.restore_release.outputs.proxy-port || steps.restore_override.outputs.proxy-port }}
