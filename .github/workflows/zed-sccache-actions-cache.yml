@@ -204,12 +204,7 @@ jobs:
         run: |
           {
             echo "paths<<EOF"
-            echo "$HOME/.cargo/registry"
-            echo "$HOME/.cargo/git"
-            echo "$HOME/.cache/sccache"
-            if [[ "${{ inputs.cache_target }}" == "true" ]]; then
-              echo "upstream/target"
-            fi
+            ./scripts/resolve-zed-cache-paths.sh "${{ inputs.cache_target }}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -462,13 +457,19 @@ jobs:
           rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           mkdir -p upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
 
+      - name: Resolve cache paths
+        id: cache_paths
+        run: |
+          {
+            echo "paths<<EOF"
+            ./scripts/resolve-zed-cache-paths.sh "${{ inputs.cache_target }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Restore cache for warm build
         uses: actions/cache/restore@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cache/sccache
+          path: ${{ steps.cache_paths.outputs.paths }}
           key: ${{ needs.seed-cache.outputs.seed_cache_key }}
           fail-on-cache-miss: true
 
