@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: fresh
+      cache_target:
+        description: "Carry the full Cargo target archive and source mtime ledger."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: zed-sccache-actions-cache-${{ github.ref_name }}-${{ inputs.cache_lane || 'fresh' }}
@@ -194,15 +199,26 @@ jobs:
         id: seed_timing_start
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve cache paths
+        id: cache_paths
+        run: |
+          {
+            echo "paths<<EOF"
+            echo "$HOME/.cargo/registry"
+            echo "$HOME/.cargo/git"
+            echo "$HOME/.cache/sccache"
+            if [[ "${{ inputs.cache_target }}" == "true" ]]; then
+              echo "upstream/target"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Restore rolling actions/cache history
         if: ${{ inputs.cache_lane == 'rolling' }}
         id: restore_rolling_ac
         uses: actions/cache/restore@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cache/sccache
+          path: ${{ steps.cache_paths.outputs.paths }}
           key: ${{ steps.scope.outputs.cache_key_primary }}
           restore-keys: |
             ${{ steps.scope.outputs.cache_key_prefix }}-
@@ -223,11 +239,27 @@ jobs:
           fi
           echo "status=${status}" >> "$GITHUB_OUTPUT"
 
+      - name: Restore or initialize Cargo source mtimes
+        if: ${{ inputs.cache_target }}
+        run: |
+          set -euo pipefail
+          node ./scripts/run-mtime-cache.js ./upstream | tee /tmp/zed-mtime-rolling.txt
+          restored="$(awk '$1 == "*" && $2 == "restored:" { print $3 }' /tmp/zed-mtime-rolling.txt)"
+          added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' /tmp/zed-mtime-rolling.txt)"
+          invalid="$(awk '$1 == "*" && $2 == "invalid:" { print $3 }' /tmp/zed-mtime-rolling.txt)"
+          if [[ $(( ${restored:-0} + ${added:-0} )) -lt 1 || "${invalid:-0}" -ne 0 ]]; then
+            echo "Cargo source mtime ledger was invalid" >&2
+            exit 1
+          fi
+          echo "Cargo source mtimes: ${restored:-0} restored, ${added:-0} added, ${invalid:-0} invalid"
+
       - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build
         run: |
           set -euo pipefail
-          rm -rf upstream/target
+          if [[ "${{ inputs.cache_target }}" != "true" ]]; then
+            rm -rf upstream/target
+          fi
           if [[ "${{ inputs.cache_lane || 'fresh' }}" != "rolling" ]]; then
             rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
           fi
@@ -240,6 +272,14 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - phase_start))" >> "$GITHUB_OUTPUT"
           echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Capture target working set
+        if: ${{ inputs.cache_target }}
+        run: |
+          set -euo pipefail
+          target_bytes="$(du -sb upstream/target | cut -f1)"
+          target_files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          echo "Target working set: ${target_bytes} bytes across ${target_files} files"
 
       - name: Persist build native tool stats
         if: always()
@@ -264,10 +304,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cache/sccache
+          path: ${{ steps.cache_paths.outputs.paths }}
           key: ${{ steps.scope.outputs.cache_key_primary }}
 
       - name: Save build cache (fallback key)
@@ -276,10 +313,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cache/sccache
+          path: ${{ steps.cache_paths.outputs.paths }}
           key: ${{ steps.scope.outputs.cache_key_fallback }}
 
       - name: Resolve build cache key

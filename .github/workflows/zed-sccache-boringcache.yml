@@ -245,16 +245,19 @@ jobs:
           end="$(date +%s)"
           echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
 
-      - name: Initialize Cargo source mtime cache
+      - name: Restore or initialize Cargo source mtimes
         if: ${{ inputs.cache_target }}
         run: |
           set -euo pipefail
-          node ./scripts/run-mtime-cache.js ./upstream | tee /tmp/zed-mtime-seed.txt
-          added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' /tmp/zed-mtime-seed.txt)"
-          if [[ "${added:-0}" -lt 1 ]]; then
-            echo "Cargo source mtime cache recorded no source files" >&2
+          node ./scripts/run-mtime-cache.js ./upstream | tee /tmp/zed-mtime-rolling.txt
+          restored="$(awk '$1 == "*" && $2 == "restored:" { print $3 }' /tmp/zed-mtime-rolling.txt)"
+          added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' /tmp/zed-mtime-rolling.txt)"
+          invalid="$(awk '$1 == "*" && $2 == "invalid:" { print $3 }' /tmp/zed-mtime-rolling.txt)"
+          if [[ $(( ${restored:-0} + ${added:-0} )) -lt 1 || "${invalid:-0}" -ne 0 ]]; then
+            echo "Cargo source mtime ledger was invalid" >&2
             exit 1
           fi
+          echo "Cargo source mtimes: ${restored:-0} restored, ${added:-0} added, ${invalid:-0} invalid"
 
       - name: ${{ inputs.cache_lane == 'rolling' && 'Run rolling commit build' || 'Run fresh cold build' }}
         id: cold_baseline_build

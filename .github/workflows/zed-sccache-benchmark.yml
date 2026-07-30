@@ -31,6 +31,7 @@ jobs:
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
     with:
       cache_lane: ${{ github.event_name == 'pull_request' && 'fresh' || 'rolling' }}
+      cache_target: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
 
   boringcache:
@@ -38,4 +39,5 @@ jobs:
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
       cache_lane: ${{ github.event_name == 'pull_request' && 'fresh' || 'rolling' }}
+      cache_target: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
