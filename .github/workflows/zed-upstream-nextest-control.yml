@@ -1,0 +1,369 @@
+name: "Zed upstream nextest control"
+run-name: "Exact upstream nextest | parent to successor | 16-core | v1.15.0"
+
+on:
+  push:
+    branches:
+      - agent/zed-upstream-nextest-control
+
+concurrency:
+  group: zed-upstream-nextest-control-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BENCHMARK_WORKSPACE: boringcache/benchmark-zed
+  SEED_SOURCE_SHA: 259297035a3fd64be4fb36042c229f59f074e38b
+  ROLLING_SOURCE_SHA: 6109c2e6d83b81f653d20f13cc25a909518b2c31
+  RUST_VERSION: "1.95.0"
+  CACHE_SCOPE: zed-nextest-control-r${{ github.run_id }}-a${{ github.run_attempt }}
+  ACTION_SHA: 8294be671cd5a2b73638df1b8e1e240df888297e
+
+jobs:
+  seed-nextest-target:
+    name: Seed parent nextest target
+    runs-on: ubuntu-latest-l
+    timeout-minutes: 120
+    env:
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=nextest-parent-seed
+    steps:
+      - name: Validate save and restore tokens
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BORINGCACHE_RESTORE_TOKEN" ]]
+          [[ -n "$BORINGCACHE_SAVE_TOKEN" ]]
+
+      - name: Checkout benchmark workflow
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout exact parent source
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+          git -C upstream fetch --depth 1 origin "$SEED_SOURCE_SHA"
+          git -C upstream checkout --detach "$SEED_SOURCE_SHA"
+          [[ "$(git -C upstream rev-parse HEAD)" == "$SEED_SOURCE_SHA" ]]
+
+      - name: Capture runner contract
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-proof
+          jq -n \
+            --arg source_sha "$SEED_SOURCE_SHA" \
+            --arg cpu_model "$(awk -F: '/^model name/ { value=$2; sub(/^[[:space:]]+/, "", value); print value; exit }' /proc/cpuinfo)" \
+            --argjson logical_cores "$(nproc)" \
+            --argjson memory_bytes "$(awk '/MemTotal:/ { print $2 * 1024 }' /proc/meminfo)" \
+            '{phase:"seed", source_sha:$source_sha, cpu_model:$cpu_model, logical_cores:$logical_cores, memory_bytes:$memory_bytes}' \
+            > benchmark-proof/runner.json
+          [[ "$(nproc)" == "16" ]]
+
+      - name: Free runner disk space
+        env:
+          BORINGCACHE_MIN_FREE_DISK_GB: "120"
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Set up Zed Linux dependencies
+        working-directory: upstream
+        run: ./script/linux
+
+      - name: Set up exact Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Set up Zed Cargo configuration
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          mkdir -p ../.cargo
+          cp ./.cargo/ci-config.toml ../.cargo/config.toml
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          check-latest: true
+          package-manager-cache: false
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9
+        with:
+          tool: cargo-nextest
+
+      - name: Scope isolated cache tags
+        run: ./scripts/scope-boringcache-run.sh "$CACHE_SCOPE"
+
+      - name: Configure BoringCache target and sccache
+        id: cache
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        with:
+          setup: none
+          mode: sccache
+          trust-policy: publish
+          working-directory: ./upstream
+          cache-profiles: zed-target
+          sccache-version: 0.16.0
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
+
+      - name: Download WASI SDK
+        working-directory: upstream
+        run: ./script/download-wasi-sdk
+
+      - name: Apply upstream target size policy
+        working-directory: upstream
+        run: ./script/clear-target-dir-if-larger-than 350 200
+
+      - name: Initialize source mtime sidecar
+        run: node ./scripts/run-mtime-cache.js ./upstream | tee benchmark-proof/mtime.txt
+
+      - name: Run exact upstream nextest suite
+        id: nextest
+        working-directory: upstream
+        env:
+          CARGO_TERM_COLOR: never
+          NO_COLOR: "1"
+          SCCACHE_IDLE_TIMEOUT: "0"
+        run: |
+          set -euo pipefail
+          sccache --zero-stats >/dev/null 2>&1 || true
+          started_at="$(date +%s)"
+          cargo nextest run --workspace --no-fail-fast --no-tests=warn 2>&1 | tee ../benchmark-proof/nextest.log
+          finished_at="$(date +%s)"
+          echo "seconds=$((finished_at - started_at))" >> "$GITHUB_OUTPUT"
+          sccache --show-stats | tee ../benchmark-proof/sccache-stats.txt
+
+      - name: Capture seed target shape
+        id: target
+        run: |
+          set -euo pipefail
+          bytes="$(du -sb upstream/target | cut -f1)"
+          files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          echo "bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          jq -n --argjson bytes "$bytes" --argjson files "$files" '{bytes:$bytes,files:$files}' > benchmark-proof/target.json
+
+      - name: Publish seed summary
+        run: |
+          {
+            echo "## Zed upstream nextest parent seed"
+            echo
+            echo "- Source: \`$SEED_SOURCE_SHA\`"
+            echo "- Exact nextest command: ${{ steps.nextest.outputs.seconds }}s"
+            echo "- Target before save: ${{ steps.target.outputs.bytes }} bytes / ${{ steps.target.outputs.files }} files"
+            echo "- Cargo incremental: \`${CARGO_INCREMENTAL:-unset}\`"
+            echo "- Cache save timing is reported by the Action post step."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload seed proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: zed-nextest-parent-seed-proof
+          path: benchmark-proof
+          if-no-files-found: error
+
+  rolling-nextest:
+    name: Restore successor and run upstream nextest
+    needs: seed-nextest-target
+    runs-on: ubuntu-latest-l
+    timeout-minutes: 120
+    env:
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=nextest-direct-successor
+    steps:
+      - name: Validate save and restore tokens
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BORINGCACHE_RESTORE_TOKEN" ]]
+          [[ -n "$BORINGCACHE_SAVE_TOKEN" ]]
+
+      - name: Checkout benchmark workflow
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout exact direct successor
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+          git -C upstream fetch --depth 2 origin "$ROLLING_SOURCE_SHA"
+          git -C upstream checkout --detach "$ROLLING_SOURCE_SHA"
+          [[ "$(git -C upstream rev-parse HEAD)" == "$ROLLING_SOURCE_SHA" ]]
+          [[ "$(git -C upstream rev-parse HEAD^)" == "$SEED_SOURCE_SHA" ]]
+
+      - name: Capture runner contract
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-proof
+          jq -n \
+            --arg seed_sha "$SEED_SOURCE_SHA" \
+            --arg source_sha "$ROLLING_SOURCE_SHA" \
+            --arg cpu_model "$(awk -F: '/^model name/ { value=$2; sub(/^[[:space:]]+/, "", value); print value; exit }' /proc/cpuinfo)" \
+            --argjson logical_cores "$(nproc)" \
+            --argjson memory_bytes "$(awk '/MemTotal:/ { print $2 * 1024 }' /proc/meminfo)" \
+            '{phase:"rolling", seed_sha:$seed_sha, source_sha:$source_sha, relation:"direct-successor", cpu_model:$cpu_model, logical_cores:$logical_cores, memory_bytes:$memory_bytes}' \
+            > benchmark-proof/runner.json
+          [[ "$(nproc)" == "16" ]]
+
+      - name: Free runner disk space
+        env:
+          BORINGCACHE_MIN_FREE_DISK_GB: "120"
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Set up Zed Linux dependencies
+        working-directory: upstream
+        run: ./script/linux
+
+      - name: Set up exact Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Set up Zed Cargo configuration
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          mkdir -p ../.cargo
+          cp ./.cargo/ci-config.toml ../.cargo/config.toml
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24
+          check-latest: true
+          package-manager-cache: false
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9
+        with:
+          tool: cargo-nextest
+
+      - name: Scope isolated cache tags
+        run: ./scripts/scope-boringcache-run.sh "$CACHE_SCOPE"
+
+      - name: Start restore timing
+        id: restore_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore and republish BoringCache target and sccache
+        id: cache
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        with:
+          setup: none
+          mode: sccache
+          trust-policy: publish
+          working-directory: ./upstream
+          cache-profiles: zed-target
+          sccache-version: 0.16.0
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
+
+      - name: Download WASI SDK
+        working-directory: upstream
+        run: ./script/download-wasi-sdk
+
+      - name: Apply upstream target size policy
+        working-directory: upstream
+        run: ./script/clear-target-dir-if-larger-than 350 200
+
+      - name: Capture restored target shape
+        id: before
+        run: |
+          set -euo pipefail
+          bytes="$(du -sb upstream/target | cut -f1)"
+          files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          echo "bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Cargo source mtimes
+        id: mtime
+        run: |
+          set -euo pipefail
+          node ./scripts/run-mtime-cache.js ./upstream | tee benchmark-proof/mtime.txt
+          restored="$(awk '$1 == "*" && $2 == "restored:" { print $3 }' benchmark-proof/mtime.txt)"
+          added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' benchmark-proof/mtime.txt)"
+          stale="$(awk '$1 == "*" && $2 == "stale:" { print $3 }' benchmark-proof/mtime.txt)"
+          invalid="$(awk '$1 == "*" && $2 == "invalid:" { print $3 }' benchmark-proof/mtime.txt)"
+          [[ "${restored:-0}" -gt 0 && "${invalid:-0}" == "0" ]]
+          {
+            echo "restored=$restored"
+            echo "added=${added:-0}"
+            echo "stale=${stale:-0}"
+            echo "invalid=${invalid:-0}"
+            echo "restore_seconds=$(( $(date +%s) - ${{ steps.restore_start.outputs.started_at }} ))"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run exact upstream nextest suite
+        id: nextest
+        working-directory: upstream
+        env:
+          CARGO_TERM_COLOR: never
+          NO_COLOR: "1"
+          SCCACHE_IDLE_TIMEOUT: "0"
+        run: |
+          set -euo pipefail
+          sccache --zero-stats >/dev/null 2>&1 || true
+          started_at="$(date +%s)"
+          cargo nextest run --workspace --no-fail-fast --no-tests=warn 2>&1 | tee ../benchmark-proof/nextest.log
+          finished_at="$(date +%s)"
+          echo "seconds=$((finished_at - started_at))" >> "$GITHUB_OUTPUT"
+          sccache --show-stats | tee ../benchmark-proof/sccache-stats.txt
+
+      - name: Capture rolling target shape
+        id: after
+        run: |
+          set -euo pipefail
+          bytes="$(du -sb upstream/target | cut -f1)"
+          files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          echo "bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --argjson bytes_before "${{ steps.before.outputs.bytes }}" \
+            --argjson files_before "${{ steps.before.outputs.files }}" \
+            --argjson bytes_after "$bytes" \
+            --argjson files_after "$files" \
+            '{bytes_before:$bytes_before,files_before:$files_before,bytes_after:$bytes_after,files_after:$files_after,byte_delta:($bytes_after-$bytes_before),file_delta:($files_after-$files_before)}' \
+            > benchmark-proof/target.json
+
+      - name: Publish rolling summary
+        run: |
+          {
+            echo "## Zed exact upstream nextest rolling control"
+            echo
+            echo "- Parent: \`$SEED_SOURCE_SHA\`"
+            echo "- Direct successor: \`$ROLLING_SOURCE_SHA\`"
+            echo "- Restore plus mtime: ${{ steps.mtime.outputs.restore_seconds }}s"
+            echo "- Exact nextest command: ${{ steps.nextest.outputs.seconds }}s"
+            echo "- Target: ${{ steps.before.outputs.bytes }} -> ${{ steps.after.outputs.bytes }} bytes"
+            echo "- Files: ${{ steps.before.outputs.files }} -> ${{ steps.after.outputs.files }}"
+            echo "- Mtimes: ${{ steps.mtime.outputs.restored }} restored / ${{ steps.mtime.outputs.added }} added / ${{ steps.mtime.outputs.stale }} stale / ${{ steps.mtime.outputs.invalid }} invalid"
+            echo "- Cargo incremental: \`${CARGO_INCREMENTAL:-unset}\`"
+            echo "- Rolling save timing is reported by the Action post step."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rolling proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: zed-nextest-direct-successor-proof
+          path: benchmark-proof
+          if-no-files-found: error
