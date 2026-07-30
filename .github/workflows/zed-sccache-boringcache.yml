@@ -200,7 +200,7 @@ jobs:
           mode: sccache
           trust-policy: publish
           working-directory: ./upstream
-          cache-profiles: ${{ inputs.cache_target && 'zed-target' || '' }}
+          cache-profiles: ${{ inputs.cache_target && 'zed-target' || 'cargo-deps' }}
           sccache-version: 0.14.0
           verbose: true
         env:
@@ -506,7 +506,7 @@ jobs:
           mode: sccache
           trust-policy: restore
           working-directory: ./upstream
-          cache-profiles: ${{ matrix.variant == 'target-sccache' && 'zed-target' || '' }}
+          cache-profiles: ${{ matrix.variant == 'target-sccache' && 'zed-target' || 'cargo-deps' }}
           sccache-version: 0.14.0
           verbose: true
         env:
