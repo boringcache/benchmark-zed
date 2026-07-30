@@ -1,15 +1,32 @@
 workspace = "boringcache/benchmark-zed"
 
-# This benchmark uses pure-proxy sccache mode with no local-disk archive
-# entries.
-# Adding ~/.cargo/{registry,git} and ~/.cache/sccache as archives to
-# match what actions/cache restores would balloon the BoringCache
-# storage footprint, and that storage-lean tradeoff is intentional for
-# this row. Keep this file as the canonical config anchor; if a hybrid
-# pivot is later approved (parallel to gRPC's BAZEL_OUTPUT_USER_ROOT
-# fix), declare the entries here and add cache-profiles to the workflow.
+# Cargo's registry and git sources are common dependency state, not compiler
+# outputs. Keep them in the adapter's default profile so both the pure sccache
+# and target+sccache lanes compare the same build state as actions/cache.
+
+[entries.cargo-registry]
+tag = "zed-cargo-registry-local"
+
+[entries.cargo-git]
+tag = "zed-cargo-git-local"
+
+[profiles.cargo-deps]
+entries = ["cargo-registry", "cargo-git"]
+
+# The opt-in target profile adds the portable Cargo build graph. Adapter-owned
+# sccache and Cargo dependency state remain shared by both consumers.
+
+[entries.zed-target]
+tag = "zed-target-local"
+path = "upstream/target"
+
+[profiles.zed-target]
+# Explicit Action profiles replace the adapter default, so keep the common
+# dependency entries in the target shape as well.
+entries = ["cargo-registry", "cargo-git", "zed-target"]
 
 [adapters.sccache]
 tag = "zed-sccache-local"
 no-platform = true
 no-git = true
+profiles = ["cargo-deps"]
