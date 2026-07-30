@@ -1,6 +1,6 @@
 name: "Zed sccache Fresh"
 run-name: >-
-  ${{ format('Benchmark {0}{1} | {2}', inputs.cli_version != '' && 'Canary' || 'Fresh', inputs.cache_target && ' + target' || '', github.event_name == 'schedule' && 'Weekly' || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ inputs.existing_seed_16_core && format('Existing seed 30501698605 | 16-core | {0}', inputs.cli_version != '' && 'Canary' || 'v1.15.0') || format('Benchmark {0}{1} | {2}', inputs.cli_version != '' && 'Canary' || 'Fresh', inputs.cache_target && ' + target' || '', github.event_name == 'schedule' && 'Weekly' || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      existing_seed_16_core:
+        description: "Restore the immutable run 30501698605 target+sccache seed on the 16-core runner; never reseeds."
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "0 4 * * 5"
 
@@ -25,7 +30,7 @@ permissions:
 jobs:
   github-actions-cache:
     name: GHA
-    if: ${{ !inputs.cache_target }}
+    if: ${{ !inputs.cache_target && !inputs.existing_seed_16_core }}
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
     with:
       cache_lane: fresh
@@ -33,9 +38,18 @@ jobs:
 
   boringcache:
     name: BC
+    if: ${{ !inputs.existing_seed_16_core }}
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
       cache_lane: fresh
       cli_version: ${{ inputs.cli_version }}
       cache_target: ${{ inputs.cache_target }}
+    secrets: inherit
+
+  existing-seed-16-core:
+    name: BC existing seed / 16-core
+    if: ${{ inputs.existing_seed_16_core }}
+    uses: ./.github/workflows/zed-sccache-existing-seed-16-core.yml
+    with:
+      cli_version: ${{ inputs.cli_version }}
     secrets: inherit

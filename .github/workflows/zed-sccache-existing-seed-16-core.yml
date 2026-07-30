@@ -1,0 +1,461 @@
+name: "Zed sccache - existing seed 16-core"
+run-name: >-
+  ${{ format('Zed existing seed 30501698605 | 16-core | {0}', inputs.cli_version != '' && 'Canary' || 'v1.15.0') }}
+
+# Main's rolling lane currently publishes sccache and Cargo dependency state,
+# but no target archive. Mixing that rolling sccache tag with a target from a
+# different seed would invalidate the control. This workflow therefore consumes
+# the latest complete immutable four-tag seed, from run 30501698605, and checks
+# out its exact source. The only intentional variable is the runner class.
+on:
+  workflow_call:
+    inputs:
+      cli_version:
+        description: "Optional CLI canary override. Empty uses the pinned Action's v1.15.0 default."
+        required: false
+        type: string
+        default: ""
+      runner_label:
+        description: "16-core larger-runner label; defaults to the class used by the prior experiment."
+        required: false
+        type: string
+        default: ubuntu-latest-l
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: "Optional CLI canary override. Empty uses the pinned Action's v1.15.0 default."
+        required: false
+        type: string
+        default: ""
+      runner_label:
+        description: "16-core larger-runner label; defaults to the class used by the prior experiment."
+        required: false
+        type: string
+        default: ubuntu-latest-l
+
+concurrency:
+  group: zed-existing-seed-16-core-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BENCHMARK_ID: zed-sccache
+  BENCHMARK_WORKSPACE: boringcache/benchmark-zed
+  PROJECT_RUST_VERSION: "1.95.0"
+  SEED_RUN_ID: "30501698605"
+  SEED_JOB_ID: "90742557511"
+  SEEDED_UPSTREAM_SHA: "259297035a3fd64be4fb36042c229f59f074e38b"
+  SEED_CACHE_SCOPE: zed-sccache-r30501698605-a1
+  SEED_CARGO_REGISTRY_TAG: zed-sccache-r30501698605-a1-cargo-registry-ubuntu-24-x86_64
+  SEED_CARGO_REGISTRY_DIGEST: sha256:fa0de2f30d9993cd5ab7870f2061f2a06178bca215bdb4af381738832be93492
+  SEED_CARGO_GIT_TAG: zed-sccache-r30501698605-a1-cargo-git-ubuntu-24-x86_64
+  SEED_CARGO_GIT_DIGEST: sha256:bdc37b3b13f03a60e98306d2d3985526fdcf5486b38ff85bcccda7df7dde5b8b
+  SEED_TARGET_TAG: zed-sccache-r30501698605-a1-target-ubuntu-24-x86_64
+  SEED_TARGET_DIGEST: sha256:c4bd5a029d203f91190b3b2541cfa5655409cdefb8b05ba496378de493829a97
+  SEED_SCCACHE_TAG: zed-sccache-r30501698605-a1-sccache
+  SEED_TARGET_BYTES: "12954472532"
+  SEED_TARGET_FILES: "57437"
+  SEED_MTIME_FILES: "3963"
+  ACTION_SHA: 8294be671cd5a2b73638df1b8e1e240df888297e
+  RUNNER_LABEL: ${{ inputs.runner_label }}
+  EXPECTED_LOGICAL_CORES: "16"
+  STANDARD_CONTROL_JOB_ID: "90751645719"
+  STANDARD_RESTORE_SECONDS: "73"
+  STANDARD_BUILD_SECONDS: "1072"
+  STANDARD_TOTAL_SECONDS: "1145"
+
+jobs:
+  restore-and-build:
+    name: Restore + build
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
+    env:
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=existing-seed-16-core
+    steps:
+      - name: Validate restore secret
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BORINGCACHE_RESTORE_TOKEN" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
+
+      - name: Checkout benchmark workflow
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout exact seeded Zed source
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
+          if ! git -C upstream cat-file -e "${SEEDED_UPSTREAM_SHA}^{commit}" 2>/dev/null; then
+            git -C upstream fetch --no-tags --depth 1 origin "$SEEDED_UPSTREAM_SHA"
+          fi
+          git -C upstream checkout --detach "$SEEDED_UPSTREAM_SHA"
+          ./scripts/prepare-source.sh warm1
+          actual_sha="$(git -C upstream rev-parse HEAD)"
+          [[ "$actual_sha" == "$SEEDED_UPSTREAM_SHA" ]] || { echo "Expected seeded source $SEEDED_UPSTREAM_SHA, got $actual_sha" >&2; exit 1; }
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Capture runner contract
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-proof
+          logical_cores="$(nproc)"
+          [[ "$logical_cores" == "$EXPECTED_LOGICAL_CORES" ]] || {
+            echo "Expected ${EXPECTED_LOGICAL_CORES} logical cores from ${RUNNER_LABEL}, got ${logical_cores}" >&2
+            exit 1
+          }
+          {
+            echo "runner_label=${RUNNER_LABEL}"
+            echo "logical_cores=${logical_cores}"
+            echo "architecture=$(uname -m)"
+            echo "kernel=$(uname -sr)"
+            echo "cpu_model=$(awk -F: '/^model name/ { value=$2; sub(/^[[:space:]]+/, \"\", value); print value; exit }' /proc/cpuinfo)"
+            echo "memory_bytes=$(awk '/^MemTotal:/ { print $2 * 1024 }' /proc/meminfo)"
+          } | tee benchmark-proof/runner.env
+          lscpu | tee benchmark-proof/lscpu.txt
+          df -h / /home /mnt 2>/dev/null | tee benchmark-proof/disk-before.txt
+          df -B1 / | tee benchmark-proof/disk-before-bytes.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libglib2.0-dev libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+
+      - name: Setup exact Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.PROJECT_RUST_VERSION }}
+
+      - name: Select immutable seed tags
+        run: |
+          set -euo pipefail
+          ./scripts/scope-boringcache-run.sh "$SEED_CACHE_SCOPE"
+          rm -rf upstream/target "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cache/sccache"
+
+          jq -n \
+            --arg seed_run_id "$SEED_RUN_ID" \
+            --arg seed_job_id "$SEED_JOB_ID" \
+            --arg source_sha "$SEEDED_UPSTREAM_SHA" \
+            --arg cache_scope "$SEED_CACHE_SCOPE" \
+            --arg cargo_registry_tag "$SEED_CARGO_REGISTRY_TAG" \
+            --arg cargo_registry_digest "$SEED_CARGO_REGISTRY_DIGEST" \
+            --arg cargo_git_tag "$SEED_CARGO_GIT_TAG" \
+            --arg cargo_git_digest "$SEED_CARGO_GIT_DIGEST" \
+            --arg target_tag "$SEED_TARGET_TAG" \
+            --arg target_digest "$SEED_TARGET_DIGEST" \
+            --arg sccache_tag "$SEED_SCCACHE_TAG" \
+            --arg action_sha "$ACTION_SHA" \
+            --arg cli_version "${{ inputs.cli_version }}" \
+            --arg runner_label "$RUNNER_LABEL" \
+            --arg standard_control_job_id "$STANDARD_CONTROL_JOB_ID" \
+            '{
+              seed: {run_id: $seed_run_id, job_id: $seed_job_id, source_sha: $source_sha, cache_scope: $cache_scope},
+              tags: {
+                cargo_registry: {tag: $cargo_registry_tag, manifest_root_digest: $cargo_registry_digest},
+                cargo_git: {tag: $cargo_git_tag, manifest_root_digest: $cargo_git_digest},
+                target: {tag: $target_tag, manifest_root_digest: $target_digest},
+                sccache: {tag: $sccache_tag}
+              },
+              action: {sha: $action_sha, cli_version: (if $cli_version == "" then "action-default-v1.15.0" else $cli_version end)},
+              runner: {label: $runner_label, expected_logical_cores: 16},
+              standard_control: {job_id: $standard_control_job_id, restore_seconds: 73, build_seconds: 1072, total_seconds: 1145},
+              invariant: "same source, same four cache tags, same Action, same Rust and sccache versions; only runner class changes",
+              rolling_note: "main rolling has no target tag, so this proof does not mix its sccache state with another seed"
+            }' > benchmark-proof/contract.json
+
+      - name: Start end-to-end timing
+        id: total_start
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore target + sccache with aligned release CLI
+        if: ${{ inputs.cli_version == '' }}
+        id: restore_release
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        with:
+          setup: none
+          mode: sccache
+          trust-policy: restore
+          working-directory: ./upstream
+          cache-profiles: zed-target
+          sccache-version: 0.14.0
+          fail-on-cache-miss: true
+          fail-on-cache-error: true
+          diagnostics: verbose
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
+
+      - name: Restore target + sccache with CLI override
+        if: ${{ inputs.cli_version != '' }}
+        id: restore_override
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: sccache
+          trust-policy: restore
+          working-directory: ./upstream
+          cache-profiles: zed-target
+          sccache-version: 0.14.0
+          fail-on-cache-miss: true
+          fail-on-cache-error: true
+          diagnostics: verbose
+          verbose: true
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_NO_GIT: "true"
+
+      - name: Verify exact restored state
+        id: restore_state
+        env:
+          RESOLVED_TAGS: ${{ steps.restore_release.outputs.resolved-tags || steps.restore_override.outputs.resolved-tags }}
+          RESOLVED_SCCACHE_TAG: ${{ steps.restore_release.outputs.sccache-tag || steps.restore_override.outputs.sccache-tag }}
+          CACHE_HIT: ${{ steps.restore_release.outputs.cache-hit || steps.restore_override.outputs.cache-hit }}
+          EVIDENCE_PATH: ${{ steps.restore_release.outputs.evidence-path || steps.restore_override.outputs.evidence-path }}
+        run: |
+          set -euo pipefail
+          restore_finished_at="$(date +%s)"
+          restore_seconds=$((restore_finished_at - ${{ steps.total_start.outputs.started_at }}))
+
+          printf '%s\n' \
+            "$SEED_CARGO_REGISTRY_TAG" \
+            "$SEED_CARGO_GIT_TAG" \
+            "$SEED_TARGET_TAG" \
+            "$SEED_SCCACHE_TAG" | sort -u > benchmark-proof/expected-tags.txt
+          printf '%s' "$RESOLVED_TAGS" | tr ',' '\n' | sed '/^$/d' | sort -u > benchmark-proof/resolved-tags.txt
+          diff -u benchmark-proof/expected-tags.txt benchmark-proof/resolved-tags.txt
+          [[ "$RESOLVED_SCCACHE_TAG" == "$SEED_SCCACHE_TAG" ]] || { echo "Resolved the wrong sccache tag" >&2; exit 1; }
+          [[ "$CACHE_HIT" == "true" ]] || { echo "BoringCache reported a cache miss" >&2; exit 1; }
+
+          tags_csv="$(paste -sd, benchmark-proof/expected-tags.txt)"
+          boringcache check "$BENCHMARK_WORKSPACE" "$tags_csv" --no-git --no-platform --exact --json > benchmark-proof/cache-check.json
+          jq -e '[.results[] | select((.status // "") != "hit")] | length == 0' benchmark-proof/cache-check.json >/dev/null
+          assert_archive_digest() {
+            local tag="$1"
+            local expected_digest="$2"
+            local actual_digest
+            actual_digest="$(jq -r --arg tag "$tag" '
+              .results[]
+              | select((.requested_tag // .requestedTag // .tag // "") == $tag)
+              | .manifest_root_digest // .manifestRootDigest // empty
+            ' benchmark-proof/cache-check.json | head -n1)"
+            [[ "$actual_digest" == "$expected_digest" ]] || {
+              echo "Expected ${tag} digest ${expected_digest}, got ${actual_digest:-<empty>}" >&2
+              exit 1
+            }
+          }
+          assert_archive_digest "$SEED_CARGO_REGISTRY_TAG" "$SEED_CARGO_REGISTRY_DIGEST"
+          assert_archive_digest "$SEED_CARGO_GIT_TAG" "$SEED_CARGO_GIT_DIGEST"
+          assert_archive_digest "$SEED_TARGET_TAG" "$SEED_TARGET_DIGEST"
+
+          target_bytes="$(du -sb upstream/target | cut -f1)"
+          target_files="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          registry_files="$(find "$HOME/.cargo/registry" -type f | wc -l | tr -d ' ')"
+          git_files="$(find "$HOME/.cargo/git" -type f | wc -l | tr -d ' ')"
+          target_size_delta=$((target_bytes - SEED_TARGET_BYTES))
+          (( target_size_delta < 0 )) && target_size_delta=$((-target_size_delta))
+          [[ "$target_size_delta" -lt 10485760 ]] || { echo "Restored target differs from the seeded apparent size by ${target_size_delta} bytes" >&2; exit 1; }
+          [[ "$target_files" == "$SEED_TARGET_FILES" ]] || { echo "Expected $SEED_TARGET_FILES target files, got $target_files" >&2; exit 1; }
+          [[ "$registry_files" -gt 0 && "$git_files" -gt 0 ]] || { echo "Cargo dependency archives were not restored" >&2; exit 1; }
+
+          if [[ -n "$EVIDENCE_PATH" && -f "$EVIDENCE_PATH" ]]; then
+            cp "$EVIDENCE_PATH" benchmark-proof/action-evidence.json
+          fi
+          df -h / /home /mnt 2>/dev/null | tee benchmark-proof/disk-after-restore.txt
+          df -B1 / | tee benchmark-proof/disk-after-restore-bytes.txt
+          {
+            echo "restore_seconds=$restore_seconds"
+            echo "target_bytes=$target_bytes"
+            echo "target_files=$target_files"
+            echo "cargo_registry_files=$registry_files"
+            echo "cargo_git_files=$git_files"
+          } | tee benchmark-proof/restore.env
+          {
+            echo "restore_seconds=$restore_seconds"
+            echo "target_bytes=$target_bytes"
+            echo "target_files=$target_files"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore exact Cargo source mtimes
+        id: mtime
+        run: |
+          set -euo pipefail
+          started_at="$(date +%s)"
+          node ./scripts/run-mtime-cache.js ./upstream | tee benchmark-proof/mtime.txt
+          finished_at="$(date +%s)"
+          restored="$(awk '$1 == "*" && $2 == "restored:" { print $3 }' benchmark-proof/mtime.txt)"
+          added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' benchmark-proof/mtime.txt)"
+          invalid="$(awk '$1 == "*" && $2 == "invalid:" { print $3 }' benchmark-proof/mtime.txt)"
+          [[ "${restored:-0}" == "$SEED_MTIME_FILES" ]] || { echo "Expected $SEED_MTIME_FILES restored source mtimes, got ${restored:-0}" >&2; exit 1; }
+          [[ "${added:-0}" == "0" && "${invalid:-0}" == "0" ]] || { echo "Cargo source mtime restoration was not exact" >&2; exit 1; }
+          echo "seconds=$((finished_at - started_at))" >> "$GITHUB_OUTPUT"
+          echo "restored=$restored" >> "$GITHUB_OUTPUT"
+
+      - name: Build exact source and capture Cargo freshness
+        id: build
+        run: |
+          set -euo pipefail
+          export SCCACHE_IDLE_TIMEOUT="0"
+          unset CARGO_NET_OFFLINE
+          sccache --zero-stats >/dev/null
+
+          build_started_at="$(date +%s)"
+          (cd upstream && cargo build --release --message-format=json-render-diagnostics) \
+            2> >(tee "$GITHUB_WORKSPACE/benchmark-proof/cargo-build.stderr.log" >&2) \
+            | tee "$GITHUB_WORKSPACE/benchmark-proof/cargo-messages.jsonl"
+          build_finished_at="$(date +%s)"
+          sccache --show-stats | tee benchmark-proof/sccache-stats.txt
+          proof_finished_at="$(date +%s)"
+
+          build_seconds=$((build_finished_at - build_started_at))
+          total_seconds=$((${{ steps.restore_state.outputs.restore_seconds }} + ${{ steps.mtime.outputs.seconds }} + build_seconds))
+          proof_wall_seconds=$((proof_finished_at - ${{ steps.total_start.outputs.started_at }}))
+          fresh_artifacts="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == true)] | length' benchmark-proof/cargo-messages.jsonl)"
+          rebuilt_artifacts="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == false)] | length' benchmark-proof/cargo-messages.jsonl)"
+          compile_requests="$(awk '$1 == "Compile" && $2 == "requests" && $3 ~ /^[0-9]+$/ { print $3; exit }' benchmark-proof/sccache-stats.txt)"
+          compile_requests_executed="$(awk '$1 == "Compile" && $2 == "requests" && $3 == "executed" { print $4; exit }' benchmark-proof/sccache-stats.txt)"
+          cache_hits="$(awk '$1 == "Cache" && $2 == "hits" && $3 ~ /^[0-9]+$/ { print $3; exit }' benchmark-proof/sccache-stats.txt)"
+          cache_misses="$(awk '$1 == "Cache" && $2 == "misses" && $3 ~ /^[0-9]+$/ { print $3; exit }' benchmark-proof/sccache-stats.txt)"
+          cache_timeouts="$(awk '$1 == "Cache" && $2 == "timeouts" { print $3; exit }' benchmark-proof/sccache-stats.txt)"
+          cache_write_errors="$(awk '$1 == "Cache" && $2 == "write" && $3 == "errors" { print $4; exit }' benchmark-proof/sccache-stats.txt)"
+          cache_errors="$(awk '$1 == "Cache" && $2 == "errors" { print $3; exit }' benchmark-proof/sccache-stats.txt)"
+
+          for value in compile_requests compile_requests_executed cache_hits cache_misses cache_timeouts cache_write_errors cache_errors; do
+            [[ -n "${!value}" ]] || { echo "Could not parse ${value} from sccache stats" >&2; exit 1; }
+          done
+          [[ "$cache_hits" -gt 0 ]] || { echo "Expected native sccache hits" >&2; exit 1; }
+          [[ "$cache_misses" == "0" && "$cache_timeouts" == "0" && "$cache_write_errors" == "0" && "$cache_errors" == "0" ]] || {
+            echo "sccache reported a backend miss or error" >&2
+            exit 1
+          }
+
+          target_bytes_after="$(du -sb upstream/target | cut -f1)"
+          target_files_after="$(find upstream/target -type f | wc -l | tr -d ' ')"
+          wall_saved_seconds=$((STANDARD_TOTAL_SECONDS - total_seconds))
+          build_saved_seconds=$((STANDARD_BUILD_SECONDS - build_seconds))
+          wall_speedup_percent="$(awk -v baseline="$STANDARD_TOTAL_SECONDS" -v actual="$total_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')"
+          build_speedup_percent="$(awk -v baseline="$STANDARD_BUILD_SECONDS" -v actual="$build_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')"
+          cpu_model="$(awk -F: '/^model name/ { value=$2; sub(/^[[:space:]]+/, "", value); print value; exit }' /proc/cpuinfo)"
+          memory_bytes="$(awk '/^MemTotal:/ { print $2 * 1024 }' /proc/meminfo)"
+
+          jq -n \
+            --slurpfile contract benchmark-proof/contract.json \
+            --arg cpu_model "$cpu_model" \
+            --argjson logical_cores "$(nproc)" \
+            --argjson memory_bytes "$memory_bytes" \
+            --argjson restore_seconds "${{ steps.restore_state.outputs.restore_seconds }}" \
+            --argjson mtime_seconds "${{ steps.mtime.outputs.seconds }}" \
+            --argjson build_seconds "$build_seconds" \
+            --argjson total_seconds "$total_seconds" \
+            --argjson proof_wall_seconds "$proof_wall_seconds" \
+            --argjson target_bytes_before "${{ steps.restore_state.outputs.target_bytes }}" \
+            --argjson target_files_before "${{ steps.restore_state.outputs.target_files }}" \
+            --argjson target_bytes_after "$target_bytes_after" \
+            --argjson target_files_after "$target_files_after" \
+            --argjson fresh_artifacts "$fresh_artifacts" \
+            --argjson rebuilt_artifacts "$rebuilt_artifacts" \
+            --argjson compile_requests "$compile_requests" \
+            --argjson compile_requests_executed "$compile_requests_executed" \
+            --argjson cache_hits "$cache_hits" \
+            --argjson cache_misses "$cache_misses" \
+            --argjson cache_timeouts "$cache_timeouts" \
+            --argjson cache_write_errors "$cache_write_errors" \
+            --argjson cache_errors "$cache_errors" \
+            --argjson wall_saved_seconds "$wall_saved_seconds" \
+            --argjson build_saved_seconds "$build_saved_seconds" \
+            --argjson wall_speedup_percent "$wall_speedup_percent" \
+            --argjson build_speedup_percent "$build_speedup_percent" \
+            '{
+              contract: $contract[0],
+              runner: {cpu_model: $cpu_model, logical_cores: $logical_cores, memory_bytes: $memory_bytes},
+              timing: {restore_seconds: $restore_seconds, mtime_seconds: $mtime_seconds, build_seconds: $build_seconds, total_seconds: $total_seconds, proof_wall_seconds: $proof_wall_seconds},
+              target: {bytes_before: $target_bytes_before, files_before: $target_files_before, bytes_after: $target_bytes_after, files_after: $target_files_after},
+              cargo: {fresh_artifacts: $fresh_artifacts, rebuilt_artifacts: $rebuilt_artifacts},
+              sccache: {compile_requests: $compile_requests, compile_requests_executed: $compile_requests_executed, hits: $cache_hits, misses: $cache_misses, timeouts: $cache_timeouts, write_errors: $cache_write_errors, errors: $cache_errors},
+              comparison_to_standard_same_seed: {wall_saved_seconds: $wall_saved_seconds, build_saved_seconds: $build_saved_seconds, wall_speedup_percent: $wall_speedup_percent, build_speedup_percent: $build_speedup_percent}
+            }' > benchmark-proof/result.json
+
+          {
+            echo "## Zed target + sccache on 16 cores"
+            echo
+            echo "Exact seed: run ${SEED_RUN_ID}, source \`${SEEDED_UPSTREAM_SHA}\`. No cache was published or advanced."
+            echo
+            echo "| Runner | Restore | Build | Total | Cargo fresh/rebuilt | sccache hits/misses/errors |"
+            echo "| --- | ---: | ---: | ---: | ---: | ---: |"
+            echo "| Standard control | ${STANDARD_RESTORE_SECONDS}s | ${STANDARD_BUILD_SECONDS}s | ${STANDARD_TOTAL_SECONDS}s | not captured | 120/0/0 |"
+            echo "| ${RUNNER_LABEL} ($(nproc) cores) | ${{ steps.restore_state.outputs.restore_seconds }}s | ${build_seconds}s | ${total_seconds}s | ${fresh_artifacts}/${rebuilt_artifacts} | ${cache_hits}/${cache_misses}/${cache_errors} |"
+            echo
+            echo "16-core delta: ${wall_saved_seconds}s total (${wall_speedup_percent}%) and ${build_saved_seconds}s build (${build_speedup_percent}%)."
+          } | tee benchmark-proof/summary.md
+
+          df -h / /home /mnt 2>/dev/null | tee benchmark-proof/disk-after-build.txt
+          df -B1 / | tee benchmark-proof/disk-after-build-bytes.txt
+          {
+            echo "build_seconds=$build_seconds"
+            echo "total_seconds=$total_seconds"
+            echo "proof_wall_seconds=$proof_wall_seconds"
+            echo "fresh_artifacts=$fresh_artifacts"
+            echo "rebuilt_artifacts=$rebuilt_artifacts"
+            echo "cache_hits=$cache_hits"
+            echo "cache_misses=$cache_misses"
+            echo "cache_errors=$cache_errors"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Collect BoringCache diagnostics
+        if: always()
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          RESOLVED_TAGS: ${{ steps.restore_release.outputs.resolved-tags || steps.restore_override.outputs.resolved-tags }}
+          RESOLVED_SCCACHE_TAG: ${{ steps.restore_release.outputs.sccache-tag || steps.restore_override.outputs.sccache-tag }}
+          PROXY_PORT: ${{ steps.restore_release.outputs.proxy-port || steps.restore_override.outputs.proxy-port }}
+          PROXY_LOG_PATH: ${{ steps.restore_release.outputs.proxy-log-path || steps.restore_override.outputs.proxy-log-path }}
+        run: |
+          set -euo pipefail
+          [[ -n "$RESOLVED_TAGS" && -n "$RESOLVED_SCCACHE_TAG" ]] || exit 0
+          ./scripts/collect-boringcache-diagnostics.sh \
+            --output-dir benchmark-proof/diagnostics \
+            --workspace "$BENCHMARK_WORKSPACE" \
+            --tags "$RESOLVED_TAGS" \
+            --phase existing-seed-16-core \
+            --cache-tag "$RESOLVED_SCCACHE_TAG" \
+            --proxy-port "$PROXY_PORT" \
+            --proxy-log-path "$PROXY_LOG_PATH" \
+            --cache-root "$HOME/.cache/sccache" \
+            --cache-label sccache-cache
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [[ -s benchmark-proof/summary.md ]]; then
+            cat benchmark-proof/summary.md >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -s benchmark-proof/contract.json ]]; then
+            {
+              echo "## Zed existing-seed 16-core proof"
+              echo
+              echo "The proof stopped before producing final performance evidence. See the uploaded contract and diagnostics."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload proof evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-existing-seed-16-core-proof
+          path: benchmark-proof
+          if-no-files-found: error
