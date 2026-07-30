@@ -1,12 +1,14 @@
-name: "Zed sccache - existing seed 16-core"
+name: "Zed sccache - existing seed high-core"
 run-name: >-
-  ${{ format('Zed existing seed 30501698605 | 16-core | {0}', inputs.cli_version != '' && 'Canary' || 'v1.15.0') }}
+  ${{ format('Zed rolling from seed 30501698605 | {0}-core | {1}', inputs.expected_logical_cores, inputs.cli_version != '' && 'Canary' || 'v1.15.0') }}
 
 # Main's rolling lane currently publishes sccache and Cargo dependency state,
 # but no target archive. Mixing that rolling sccache tag with a target from a
 # different seed would invalidate the control. This workflow therefore consumes
-# the latest complete immutable four-tag seed, from run 30501698605, and checks
-# out its exact source. The only intentional variable is the runner class.
+# the latest complete immutable four-tag seed, from run 30501698605. It can
+# build either that seed source or its direct successor without publishing new
+# cache state. Comparing runs with the same source keeps runner class as the
+# only intentional variable.
 on:
   workflow_call:
     inputs:
@@ -16,10 +18,20 @@ on:
         type: string
         default: ""
       runner_label:
-        description: "16-core larger-runner label; defaults to the class used by the prior experiment."
+        description: "Hosted runner label."
         required: false
         type: string
         default: ubuntu-latest-l
+      expected_logical_cores:
+        description: "Exact logical-core count required from the selected runner."
+        required: false
+        type: string
+        default: "16"
+      source_sha:
+        description: "Seed source or its direct successor to build read-only."
+        required: false
+        type: string
+        default: 6109c2e6d83b81f653d20f13cc25a909518b2c31
   workflow_dispatch:
     inputs:
       cli_version:
@@ -28,13 +40,23 @@ on:
         type: string
         default: ""
       runner_label:
-        description: "16-core larger-runner label; defaults to the class used by the prior experiment."
+        description: "Hosted runner label."
         required: false
         type: string
         default: ubuntu-latest-l
+      expected_logical_cores:
+        description: "Exact logical-core count required from the selected runner."
+        required: false
+        type: string
+        default: "16"
+      source_sha:
+        description: "Seed source or its direct successor to build read-only."
+        required: false
+        type: string
+        default: 6109c2e6d83b81f653d20f13cc25a909518b2c31
 
 concurrency:
-  group: zed-existing-seed-16-core-${{ github.ref_name }}
+  group: zed-existing-seed-${{ inputs.expected_logical_cores }}-core-${{ inputs.source_sha }}-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -48,6 +70,7 @@ env:
   SEED_RUN_ID: "30501698605"
   SEED_JOB_ID: "90742557511"
   SEEDED_UPSTREAM_SHA: "259297035a3fd64be4fb36042c229f59f074e38b"
+  BUILD_UPSTREAM_SHA: ${{ inputs.source_sha }}
   SEED_CACHE_SCOPE: zed-sccache-r30501698605-a1
   SEED_CARGO_REGISTRY_TAG: zed-sccache-r30501698605-a1-cargo-registry-ubuntu-24-x86_64
   SEED_CARGO_REGISTRY_DIGEST: sha256:fa0de2f30d9993cd5ab7870f2061f2a06178bca215bdb4af381738832be93492
@@ -61,7 +84,7 @@ env:
   SEED_MTIME_FILES: "3963"
   ACTION_SHA: 8294be671cd5a2b73638df1b8e1e240df888297e
   RUNNER_LABEL: ${{ inputs.runner_label }}
-  EXPECTED_LOGICAL_CORES: "16"
+  EXPECTED_LOGICAL_CORES: ${{ inputs.expected_logical_cores }}
   STANDARD_CONTROL_JOB_ID: "90751645719"
   STANDARD_RESTORE_SECONDS: "73"
   STANDARD_BUILD_SECONDS: "1072"
@@ -73,7 +96,7 @@ jobs:
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 120
     env:
-      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=existing-seed-16-core
+      BORINGCACHE_PROXY_METADATA_HINTS: benchmark=zed-sccache,phase=existing-seed-high-core
     steps:
       - name: Validate restore secret
         env:
@@ -88,18 +111,32 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Checkout exact seeded Zed source
+      - name: Checkout controlled Zed source
         run: |
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 1 --recommend-shallow --jobs 4 upstream
-          if ! git -C upstream cat-file -e "${SEEDED_UPSTREAM_SHA}^{commit}" 2>/dev/null; then
-            git -C upstream fetch --no-tags --depth 1 origin "$SEEDED_UPSTREAM_SHA"
+          if ! git -C upstream cat-file -e "${BUILD_UPSTREAM_SHA}^{commit}" 2>/dev/null; then
+            git -C upstream fetch --no-tags --depth 2 origin "$BUILD_UPSTREAM_SHA"
           fi
-          git -C upstream checkout --detach "$SEEDED_UPSTREAM_SHA"
+          git -C upstream checkout --detach "$BUILD_UPSTREAM_SHA"
           ./scripts/prepare-source.sh warm1
           actual_sha="$(git -C upstream rev-parse HEAD)"
-          [[ "$actual_sha" == "$SEEDED_UPSTREAM_SHA" ]] || { echo "Expected seeded source $SEEDED_UPSTREAM_SHA, got $actual_sha" >&2; exit 1; }
+          [[ "$actual_sha" == "$BUILD_UPSTREAM_SHA" ]] || { echo "Expected build source $BUILD_UPSTREAM_SHA, got $actual_sha" >&2; exit 1; }
+
+          if [[ "$BUILD_UPSTREAM_SHA" == "$SEEDED_UPSTREAM_SHA" ]]; then
+            source_relation="same-source"
+          else
+            git -C upstream fetch --no-tags --depth 2 origin "$BUILD_UPSTREAM_SHA"
+            parent_sha="$(git -C upstream rev-parse "${BUILD_UPSTREAM_SHA}^")"
+            [[ "$parent_sha" == "$SEEDED_UPSTREAM_SHA" ]] || {
+              echo "Build source must be the seed or its direct successor; expected parent $SEEDED_UPSTREAM_SHA, got $parent_sha" >&2
+              exit 1
+            }
+            source_relation="direct-successor"
+          fi
+          mkdir -p benchmark-proof
+          echo "source_relation=${source_relation}" | tee benchmark-proof/source.env
 
       - name: Free runner disk space
         run: ./scripts/free-runner-disk.sh
@@ -150,7 +187,9 @@ jobs:
           jq -n \
             --arg seed_run_id "$SEED_RUN_ID" \
             --arg seed_job_id "$SEED_JOB_ID" \
-            --arg source_sha "$SEEDED_UPSTREAM_SHA" \
+            --arg seed_source_sha "$SEEDED_UPSTREAM_SHA" \
+            --arg build_source_sha "$BUILD_UPSTREAM_SHA" \
+            --arg source_relation "$(cut -d= -f2 benchmark-proof/source.env)" \
             --arg cache_scope "$SEED_CACHE_SCOPE" \
             --arg cargo_registry_tag "$SEED_CARGO_REGISTRY_TAG" \
             --arg cargo_registry_digest "$SEED_CARGO_REGISTRY_DIGEST" \
@@ -162,9 +201,11 @@ jobs:
             --arg action_sha "$ACTION_SHA" \
             --arg cli_version "${{ inputs.cli_version }}" \
             --arg runner_label "$RUNNER_LABEL" \
+            --argjson expected_logical_cores "$EXPECTED_LOGICAL_CORES" \
             --arg standard_control_job_id "$STANDARD_CONTROL_JOB_ID" \
             '{
-              seed: {run_id: $seed_run_id, job_id: $seed_job_id, source_sha: $source_sha, cache_scope: $cache_scope},
+              seed: {run_id: $seed_run_id, job_id: $seed_job_id, source_sha: $seed_source_sha, cache_scope: $cache_scope},
+              build: {source_sha: $build_source_sha, relation_to_seed: $source_relation},
               tags: {
                 cargo_registry: {tag: $cargo_registry_tag, manifest_root_digest: $cargo_registry_digest},
                 cargo_git: {tag: $cargo_git_tag, manifest_root_digest: $cargo_git_digest},
@@ -172,9 +213,9 @@ jobs:
                 sccache: {tag: $sccache_tag}
               },
               action: {sha: $action_sha, cli_version: (if $cli_version == "" then "action-default-v1.15.0" else $cli_version end)},
-              runner: {label: $runner_label, expected_logical_cores: 16},
+              runner: {label: $runner_label, expected_logical_cores: $expected_logical_cores},
               standard_control: {job_id: $standard_control_job_id, restore_seconds: 73, build_seconds: 1072, total_seconds: 1145},
-              invariant: "same source, same four cache tags, same Action, same Rust and sccache versions; only runner class changes",
+              invariant: "same immutable four-tag seed, same build source, same Action, same Rust and sccache versions; only runner class changes between paired runs",
               rolling_note: "main rolling has no target tag, so this proof does not mix its sccache state with another seed"
             }' > benchmark-proof/contract.json
 
@@ -293,7 +334,7 @@ jobs:
             echo "target_files=$target_files"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Restore exact Cargo source mtimes
+      - name: Restore valid Cargo source mtimes
         id: mtime
         run: |
           set -euo pipefail
@@ -302,13 +343,22 @@ jobs:
           finished_at="$(date +%s)"
           restored="$(awk '$1 == "*" && $2 == "restored:" { print $3 }' benchmark-proof/mtime.txt)"
           added="$(awk '$1 == "*" && $2 == "added:" { print $3 }' benchmark-proof/mtime.txt)"
+          stale="$(awk '$1 == "*" && $2 == "stale:" { print $3 }' benchmark-proof/mtime.txt)"
           invalid="$(awk '$1 == "*" && $2 == "invalid:" { print $3 }' benchmark-proof/mtime.txt)"
-          [[ "${restored:-0}" == "$SEED_MTIME_FILES" ]] || { echo "Expected $SEED_MTIME_FILES restored source mtimes, got ${restored:-0}" >&2; exit 1; }
-          [[ "${added:-0}" == "0" && "${invalid:-0}" == "0" ]] || { echo "Cargo source mtime restoration was not exact" >&2; exit 1; }
-          echo "seconds=$((finished_at - started_at))" >> "$GITHUB_OUTPUT"
-          echo "restored=$restored" >> "$GITHUB_OUTPUT"
+          [[ "${restored:-0}" -gt 0 ]] || { echo "No seeded source mtimes were restored" >&2; exit 1; }
+          [[ "${invalid:-0}" == "0" ]] || { echo "Cargo source mtime restoration reported invalid entries" >&2; exit 1; }
+          if [[ "$BUILD_UPSTREAM_SHA" == "$SEEDED_UPSTREAM_SHA" ]]; then
+            [[ "$restored" == "$SEED_MTIME_FILES" ]] || { echo "Expected $SEED_MTIME_FILES restored source mtimes, got $restored" >&2; exit 1; }
+            [[ "${added:-0}" == "0" && "${stale:-0}" == "0" ]] || { echo "Same-source mtime restoration was not exact" >&2; exit 1; }
+          fi
+          {
+            echo "seconds=$((finished_at - started_at))"
+            echo "restored=$restored"
+            echo "added=${added:-0}"
+            echo "stale=${stale:-0}"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Build exact source and capture Cargo freshness
+      - name: Build controlled source and capture Cargo freshness
         id: build
         run: |
           set -euo pipefail
@@ -341,17 +391,27 @@ jobs:
             [[ -n "${!value}" ]] || { echo "Could not parse ${value} from sccache stats" >&2; exit 1; }
           done
           [[ "$cache_hits" -gt 0 ]] || { echo "Expected native sccache hits" >&2; exit 1; }
-          [[ "$cache_misses" == "0" && "$cache_timeouts" == "0" && "$cache_write_errors" == "0" && "$cache_errors" == "0" ]] || {
-            echo "sccache reported a backend miss or error" >&2
+          [[ "$cache_timeouts" == "0" && "$cache_write_errors" == "0" && "$cache_errors" == "0" ]] || {
+            echo "sccache reported a backend error" >&2
             exit 1
           }
+          if [[ "$BUILD_UPSTREAM_SHA" == "$SEEDED_UPSTREAM_SHA" && "$cache_misses" != "0" ]]; then
+            echo "Same-source build unexpectedly missed sccache" >&2
+            exit 1
+          fi
 
           target_bytes_after="$(du -sb upstream/target | cut -f1)"
           target_files_after="$(find upstream/target -type f | wc -l | tr -d ' ')"
-          wall_saved_seconds=$((STANDARD_TOTAL_SECONDS - total_seconds))
-          build_saved_seconds=$((STANDARD_BUILD_SECONDS - build_seconds))
-          wall_speedup_percent="$(awk -v baseline="$STANDARD_TOTAL_SECONDS" -v actual="$total_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')"
-          build_speedup_percent="$(awk -v baseline="$STANDARD_BUILD_SECONDS" -v actual="$build_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')"
+          if [[ "$BUILD_UPSTREAM_SHA" == "$SEEDED_UPSTREAM_SHA" ]]; then
+            comparison_json="$(jq -n \
+              --argjson wall_saved_seconds "$((STANDARD_TOTAL_SECONDS - total_seconds))" \
+              --argjson build_saved_seconds "$((STANDARD_BUILD_SECONDS - build_seconds))" \
+              --argjson wall_speedup_percent "$(awk -v baseline="$STANDARD_TOTAL_SECONDS" -v actual="$total_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')" \
+              --argjson build_speedup_percent "$(awk -v baseline="$STANDARD_BUILD_SECONDS" -v actual="$build_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')" \
+              '{wall_saved_seconds: $wall_saved_seconds, build_saved_seconds: $build_saved_seconds, wall_speedup_percent: $wall_speedup_percent, build_speedup_percent: $build_speedup_percent}')"
+          else
+            comparison_json="null"
+          fi
           cpu_model="$(lscpu | awk -F: '/^Model name:/ { value=$2; sub(/^[[:space:]]+/, "", value); print value; exit }')"
           memory_bytes="$(awk '/^MemTotal:/ { print $2 * 1024 }' /proc/meminfo)"
 
@@ -378,10 +438,7 @@ jobs:
             --argjson cache_timeouts "$cache_timeouts" \
             --argjson cache_write_errors "$cache_write_errors" \
             --argjson cache_errors "$cache_errors" \
-            --argjson wall_saved_seconds "$wall_saved_seconds" \
-            --argjson build_saved_seconds "$build_saved_seconds" \
-            --argjson wall_speedup_percent "$wall_speedup_percent" \
-            --argjson build_speedup_percent "$build_speedup_percent" \
+            --argjson comparison_to_standard_same_seed "$comparison_json" \
             '{
               contract: $contract[0],
               runner: {cpu_model: $cpu_model, logical_cores: $logical_cores, memory_bytes: $memory_bytes},
@@ -389,20 +446,28 @@ jobs:
               target: {bytes_before: $target_bytes_before, files_before: $target_files_before, bytes_after: $target_bytes_after, files_after: $target_files_after},
               cargo: {fresh_artifacts: $fresh_artifacts, rebuilt_artifacts: $rebuilt_artifacts},
               sccache: {compile_requests: $compile_requests, compile_requests_executed: $compile_requests_executed, hits: $cache_hits, misses: $cache_misses, timeouts: $cache_timeouts, write_errors: $cache_write_errors, errors: $cache_errors},
-              comparison_to_standard_same_seed: {wall_saved_seconds: $wall_saved_seconds, build_saved_seconds: $build_saved_seconds, wall_speedup_percent: $wall_speedup_percent, build_speedup_percent: $build_speedup_percent}
+              comparison_to_standard_same_seed: $comparison_to_standard_same_seed
             }' > benchmark-proof/result.json
 
           {
-            echo "## Zed target + sccache on 16 cores"
+            echo "## Zed target + sccache on $(nproc) cores"
             echo
-            echo "Exact seed: run ${SEED_RUN_ID}, source \`${SEEDED_UPSTREAM_SHA}\`. No cache was published or advanced."
+            echo "Immutable seed: run ${SEED_RUN_ID}, source \`${SEEDED_UPSTREAM_SHA}\`. Built \`${BUILD_UPSTREAM_SHA}\`; no cache was published or advanced."
             echo
             echo "| Runner | Restore | Build | Total | Cargo fresh/rebuilt | sccache hits/misses/errors |"
             echo "| --- | ---: | ---: | ---: | ---: | ---: |"
-            echo "| Standard control | ${STANDARD_RESTORE_SECONDS}s | ${STANDARD_BUILD_SECONDS}s | ${STANDARD_TOTAL_SECONDS}s | not captured | 120/0/0 |"
             echo "| ${RUNNER_LABEL} ($(nproc) cores) | ${{ steps.restore_state.outputs.restore_seconds }}s | ${build_seconds}s | ${total_seconds}s | ${fresh_artifacts}/${rebuilt_artifacts} | ${cache_hits}/${cache_misses}/${cache_errors} |"
             echo
-            echo "16-core delta: ${wall_saved_seconds}s total (${wall_speedup_percent}%) and ${build_saved_seconds}s build (${build_speedup_percent}%)."
+            echo "Mtimes: ${{ steps.mtime.outputs.restored }} restored, ${{ steps.mtime.outputs.added }} added, ${{ steps.mtime.outputs.stale }} stale, zero invalid."
+            if [[ "$BUILD_UPSTREAM_SHA" == "$SEEDED_UPSTREAM_SHA" ]]; then
+              wall_saved_seconds=$((STANDARD_TOTAL_SECONDS - total_seconds))
+              build_saved_seconds=$((STANDARD_BUILD_SECONDS - build_seconds))
+              wall_speedup_percent="$(awk -v baseline="$STANDARD_TOTAL_SECONDS" -v actual="$total_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')"
+              build_speedup_percent="$(awk -v baseline="$STANDARD_BUILD_SECONDS" -v actual="$build_seconds" 'BEGIN { printf "%.1f", ((baseline - actual) * 100) / baseline }')"
+              echo "Same-source standard-runner delta: ${wall_saved_seconds}s total (${wall_speedup_percent}%) and ${build_saved_seconds}s build (${build_speedup_percent}%)."
+            else
+              echo "This is a real direct-successor rolling build; compare only with the paired run on the same source."
+            fi
           } | tee benchmark-proof/summary.md
 
           df -h / /home /mnt 2>/dev/null | tee benchmark-proof/disk-after-build.txt
@@ -433,7 +498,7 @@ jobs:
             --output-dir benchmark-proof/diagnostics \
             --workspace "$BENCHMARK_WORKSPACE" \
             --tags "$RESOLVED_TAGS" \
-            --phase existing-seed-16-core \
+            --phase existing-seed-high-core \
             --cache-tag "$RESOLVED_SCCACHE_TAG" \
             --proxy-port "$PROXY_PORT" \
             --proxy-log-path "$PROXY_LOG_PATH" \
@@ -447,7 +512,7 @@ jobs:
             cat benchmark-proof/summary.md >> "$GITHUB_STEP_SUMMARY"
           elif [[ -s benchmark-proof/contract.json ]]; then
             {
-              echo "## Zed existing-seed 16-core proof"
+              echo "## Zed existing-seed high-core proof"
               echo
               echo "The proof stopped before producing final performance evidence. See the uploaded contract and diagnostics."
             } >> "$GITHUB_STEP_SUMMARY"
@@ -457,6 +522,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: zed-existing-seed-16-core-proof
+          name: zed-existing-seed-${{ inputs.expected_logical_cores }}-core-${{ inputs.source_sha }}-proof
           path: benchmark-proof
           if-no-files-found: error
