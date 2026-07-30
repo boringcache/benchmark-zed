@@ -1,6 +1,6 @@
 name: "Zed sccache Fresh"
 run-name: >-
-  ${{ inputs.existing_seed_16_core && format('Existing seed 30501698605 | 16-core | {0}', inputs.cli_version != '' && 'Canary' || 'v1.15.0') || format('Benchmark {0}{1} | {2}', inputs.cli_version != '' && 'Canary' || 'Fresh', inputs.cache_target && ' + target' || '', github.event_name == 'schedule' && 'Weekly' || format('Manual dispatch ({0})', github.ref_name)) }}
+  ${{ inputs.existing_seed_high_core && format('Rolling from seed 30501698605 | {0}-core | {1}', inputs.expected_logical_cores, inputs.cli_version != '' && 'Canary' || 'v1.15.0') || format('Benchmark {0}{1} | {2}', inputs.cli_version != '' && 'Canary' || 'Fresh', inputs.cache_target && ' + target' || '', github.event_name == 'schedule' && 'Weekly' || format('Manual dispatch ({0})', github.ref_name)) }}
 
 on:
   workflow_dispatch:
@@ -15,11 +15,26 @@ on:
         required: false
         type: boolean
         default: false
-      existing_seed_16_core:
-        description: "Restore the immutable run 30501698605 target+sccache seed on the 16-core runner; never reseeds."
+      existing_seed_high_core:
+        description: "Consume the immutable run 30501698605 seed read-only on a controlled runner and source."
         required: false
         type: boolean
         default: false
+      runner_label:
+        description: "Hosted runner label for the read-only existing-seed proof."
+        required: false
+        type: string
+        default: ubuntu-latest-l
+      expected_logical_cores:
+        description: "Exact logical-core count required from the selected proof runner."
+        required: false
+        type: string
+        default: "16"
+      source_sha:
+        description: "Seed source or its direct successor to build read-only."
+        required: false
+        type: string
+        default: 6109c2e6d83b81f653d20f13cc25a909518b2c31
   schedule:
     - cron: "0 4 * * 5"
 
@@ -30,7 +45,7 @@ permissions:
 jobs:
   github-actions-cache:
     name: GHA
-    if: ${{ !inputs.cache_target && !inputs.existing_seed_16_core }}
+    if: ${{ !inputs.cache_target && !inputs.existing_seed_high_core }}
     uses: ./.github/workflows/zed-sccache-actions-cache.yml
     with:
       cache_lane: fresh
@@ -38,7 +53,7 @@ jobs:
 
   boringcache:
     name: BC
-    if: ${{ !inputs.existing_seed_16_core }}
+    if: ${{ !inputs.existing_seed_high_core }}
     uses: ./.github/workflows/zed-sccache-boringcache.yml
     with:
       cache_lane: fresh
@@ -46,10 +61,13 @@ jobs:
       cache_target: ${{ inputs.cache_target }}
     secrets: inherit
 
-  existing-seed-16-core:
-    name: BC existing seed / 16-core
-    if: ${{ inputs.existing_seed_16_core }}
+  existing-seed-high-core:
+    name: BC existing seed / ${{ inputs.expected_logical_cores }}-core
+    if: ${{ inputs.existing_seed_high_core }}
     uses: ./.github/workflows/zed-sccache-existing-seed-16-core.yml
     with:
       cli_version: ${{ inputs.cli_version }}
+      runner_label: ${{ inputs.runner_label }}
+      expected_logical_cores: ${{ inputs.expected_logical_cores }}
+      source_sha: ${{ inputs.source_sha }}
     secrets: inherit
