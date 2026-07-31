@@ -49,6 +49,21 @@ The vendored implementation in `scripts/deno-mtime-cache-action.js` retains
 Deno's MIT copyright header. `scripts/run-mtime-cache.js` only adapts it to the
 nested Zed checkout used by this benchmark.
 
+## Cargo Product Proof
+
+The canary-only Cargo proof uses one product boundary for the complete Rust
+lifecycle. An exact immutable CLI runs `boringcache cargo --write` on the pinned
+base commit, then a fresh runner runs `boringcache cargo --read-only` on the
+adjacent head commit. The CLI owns target transport, source freshness, Cargo
+registry and Git state, and the sccache proxy in both jobs; the workflow only
+checks the signed `archive-chunks-v1` result and Cargo/native-tool evidence.
+
+This proof does not run the benchmark's Deno-derived mtime helper. It requires
+the CLI freshness descriptor to preserve unchanged source mtimes, keep changed
+sources new, make Cargo report both fresh and rebuilt artifacts, and exercise
+sccache without read errors or timeouts. Suppressed cache writes in the
+read-only rolling job are diagnostic counters, not remote-storage failures.
+
 ## Token Model
 
 This repo uses split BoringCache tokens as the standard CI shape:

@@ -124,7 +124,15 @@ jobs:
             | tee /tmp/zed-base-target.json
           jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
             /tmp/zed-base-target.json
-          jq -e '.tool == "sccache" and (.cache_read_errors // 0) == 0 and (.cache_write_errors // 0) == 0 and (.cache_timeouts // 0) == 0' \
+          jq -e '
+            .tool == "sccache"
+            and .compile_requests > 0
+            and ((.cache_hits // 0) + (.cache_misses // 0)) > 0
+            and (.cache_errors // 0) == 0
+            and (.cache_read_errors // 0) == 0
+            and (.cache_write_errors // 0) == 0
+            and (.cache_timeouts // 0) == 0
+          ' \
             /tmp/zed-base-sccache.json
           echo "target_size_bytes=$(du -sb upstream/target | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
 
@@ -245,7 +253,13 @@ jobs:
           rebuilt="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == false)] | length' /tmp/zed-head-cargo.jsonl)"
           [[ "$fresh" -gt 0 ]]
           [[ "$rebuilt" -gt 0 ]]
-          jq -e '.tool == "sccache" and (.cache_read_errors // 0) == 0 and (.cache_write_errors // 0) == 0 and (.cache_timeouts // 0) == 0' \
+          jq -e '
+            .tool == "sccache"
+            and .compile_requests > 0
+            and ((.cache_hits // 0) + (.cache_misses // 0)) > 0
+            and (.cache_read_errors // 0) == 0
+            and (.cache_timeouts // 0) == 0
+          ' \
             /tmp/zed-head-sccache.json
 
           {
