@@ -120,7 +120,11 @@ jobs:
           test -x upstream/target/release/zed
           test -s upstream/target/.boringcache/cargo-freshness-v2.json
           git -C upstream diff --quiet
-          boringcache inspect "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --json \
+          boringcache check "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --no-git --json \
+            | tee /tmp/zed-base-target-check.json
+          target_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-base-target-check.json)"
+          [[ -n "$target_tag" ]] || { echo "Published target did not resolve" >&2; exit 1; }
+          boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-base-target.json
           jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
             /tmp/zed-base-target.json
@@ -144,6 +148,7 @@ jobs:
             /tmp/zed-base-cli.log
             /tmp/zed-base-cargo.jsonl
             /tmp/zed-base-sccache.json
+            /tmp/zed-base-target-check.json
             /tmp/zed-base-target.json
           if-no-files-found: error
 
@@ -210,7 +215,11 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           test ! -e upstream/target
-          boringcache inspect "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --json \
+          boringcache check "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --no-git --json \
+            | tee /tmp/zed-head-target-check.json
+          target_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-head-target-check.json)"
+          [[ -n "$target_tag" ]] || { echo "Base target did not resolve" >&2; exit 1; }
+          boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-head-target.json
           jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
             /tmp/zed-head-target.json
@@ -290,5 +299,6 @@ jobs:
             /tmp/zed-head-cli.log
             /tmp/zed-head-cargo.jsonl
             /tmp/zed-head-sccache.json
+            /tmp/zed-head-target-check.json
             /tmp/zed-head-target.json
           if-no-files-found: error
