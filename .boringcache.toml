@@ -17,16 +17,32 @@ entries = ["cargo-registry", "cargo-git"]
 # sccache and Cargo dependency state remain shared by both consumers.
 
 [entries.zed-target]
+kind = "cargo-target"
 tag = "zed-target-local"
 path = "upstream/target"
+
+# Install Zed's pinned Rust toolchain through the same portable Action-to-CLI
+# path used by the product proof. The Cargo lifecycle remains CLI-owned.
+[entries.rust-toolchain]
+tag = "zed-rust-toolchain-1-95-0"
+path = "~/.local/share/mise/installs/rust/1.95.0"
 
 [profiles.zed-target]
 # Explicit Action profiles replace the adapter default, so keep the common
 # dependency entries in the target shape as well.
 entries = ["cargo-registry", "cargo-git", "zed-target"]
 
+[profiles.rust-toolchain]
+entries = ["rust-toolchain"]
+
 [adapters.sccache]
 tag = "zed-sccache-local"
 no-platform = true
 no-git = true
 profiles = ["cargo-deps"]
+
+[adapters.cargo]
+tag = "zed-sccache-local"
+profiles = ["zed-target"]
+no-git = true
+metadata-hints = ["benchmark=zed", "lane=cargo-product"]

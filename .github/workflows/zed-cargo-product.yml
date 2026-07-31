@@ -1,0 +1,280 @@
+name: "Zed Cargo product proof"
+
+on:
+  workflow_call:
+    inputs:
+      cli_version:
+        description: "Exact immutable BoringCache CLI canary tag."
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  BENCHMARK_WORKSPACE: boringcache/benchmark-zed
+  PROJECT_RUST_VERSION: "1.95.0"
+  CACHE_SCOPE: zed-cargo-r${{ github.run_id }}-a${{ github.run_attempt }}
+
+jobs:
+  publish-base:
+    name: Publish adjacent base through boringcache cargo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    outputs:
+      base_sha: ${{ steps.source.outputs.base_sha }}
+      head_sha: ${{ steps.source.outputs.head_sha }}
+    steps:
+      - name: Validate BoringCache secrets
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+        run: |
+          [[ -n "$BORINGCACHE_RESTORE_TOKEN" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
+          [[ -n "$BORINGCACHE_SAVE_TOKEN" ]] || { echo "Missing BoringCache save token" >&2; exit 1; }
+
+      - name: Checkout benchmark repository
+        uses: actions/checkout@v6
+
+      - name: Checkout the pinned Zed commit and its parent
+        id: source
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
+          head_sha="$(git -C upstream rev-parse HEAD)"
+          if ! base_sha="$(git -C upstream rev-parse HEAD^ 2>/dev/null)"; then
+            git -C upstream fetch --deepen=1 origin "$head_sha"
+            base_sha="$(git -C upstream rev-parse HEAD^)"
+          fi
+          git -C upstream checkout --detach "$base_sha"
+          echo "base_sha=${base_sha}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the base source tree
+        run: ./scripts/prepare-source.sh base
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libglib2.0-dev libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+
+      - name: Install pinned Rust toolchain and exact CLI with BoringCache
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          trust-policy: restore
+          setup: mise
+          tools: rust@${{ env.PROJECT_RUST_VERSION }}
+          mode: archive
+          cache-profiles: rust-toolchain
+          working-directory: .
+          verify: none
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Install exact sccache
+        run: ./scripts/install-sccache.sh --version 0.14.0
+
+      - name: Scope the Cargo product plan
+        run: ./scripts/scope-boringcache-run.sh "$CACHE_SCOPE"
+
+      - name: Require a clean product starting point
+        run: test ! -e upstream/target
+
+      - name: Build and publish through boringcache cargo
+        id: build
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_ARCHIVE_GRAPH_WRITES: "1"
+        run: |
+          set -euo pipefail
+          started_at="$(date +%s)"
+          (
+            cd upstream
+            boringcache cargo \
+              --write \
+              --fail-on-cache-error \
+              --metadata-hint phase=base \
+              --native-tool-evidence-json /tmp/zed-base-sccache.json \
+              build --release --locked --message-format=json-render-diagnostics
+          ) > >(tee /tmp/zed-base-cargo.jsonl) 2> >(tee /tmp/zed-base-cli.log >&2)
+          echo "elapsed_seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the signed chunk publication
+        id: archive
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -x upstream/target/release/zed
+          test -s upstream/target/.boringcache/cargo-freshness-v2.json
+          git -C upstream diff --quiet
+          boringcache inspect "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --json \
+            | tee /tmp/zed-base-target.json
+          jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
+            /tmp/zed-base-target.json
+          jq -e '.tool == "sccache" and (.cache_read_errors // 0) == 0 and (.cache_write_errors // 0) == 0 and (.cache_timeouts // 0) == 0' \
+            /tmp/zed-base-sccache.json
+          echo "target_size_bytes=$(du -sb upstream/target | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload base evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-cargo-product-base
+          path: |
+            /tmp/zed-base-cli.log
+            /tmp/zed-base-cargo.jsonl
+            /tmp/zed-base-sccache.json
+            /tmp/zed-base-target.json
+          if-no-files-found: error
+
+  consume-head:
+    name: Restore adjacent head through boringcache cargo
+    needs: publish-base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Validate BoringCache restore secret
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          [[ -n "$BORINGCACHE_RESTORE_TOKEN" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
+
+      - name: Checkout benchmark repository
+        uses: actions/checkout@v6
+
+      - name: Checkout the pinned Zed head
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
+          test "$(git -C upstream rev-parse HEAD)" = "${{ needs.publish-base.outputs.head_sha }}"
+
+      - name: Prepare the head source tree
+        run: ./scripts/prepare-source.sh warm1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libglib2.0-dev libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+
+      - name: Install pinned Rust toolchain and exact CLI with BoringCache
+        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          trust-policy: restore
+          setup: mise
+          tools: rust@${{ env.PROJECT_RUST_VERSION }}
+          mode: archive
+          cache-profiles: rust-toolchain
+          working-directory: .
+          verify: none
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Install exact sccache
+        run: ./scripts/install-sccache.sh --version 0.14.0
+
+      - name: Scope the same Cargo product plan
+        run: ./scripts/scope-boringcache-run.sh "$CACHE_SCOPE"
+
+      - name: Require the signed base target and an empty destination
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+        run: |
+          test ! -e upstream/target
+          boringcache inspect "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --json \
+            | tee /tmp/zed-head-target.json
+          jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
+            /tmp/zed-head-target.json
+
+      - name: Restore and build through boringcache cargo
+        id: build
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_ARCHIVE_GRAPH_WRITES: "1"
+        run: |
+          set -euo pipefail
+          started_at="$(date +%s)"
+          (
+            cd upstream
+            boringcache cargo \
+              --read-only \
+              --fail-on-cache-error \
+              --metadata-hint phase=head \
+              --native-tool-evidence-json /tmp/zed-head-sccache.json \
+              build --release --locked --message-format=json-render-diagnostics
+          ) > >(tee /tmp/zed-head-cargo.jsonl) 2> >(tee /tmp/zed-head-cli.log >&2)
+          echo "elapsed_seconds=$(( $(date +%s) - started_at ))" >> "$GITHUB_OUTPUT"
+
+      - name: Verify target, source freshness, Cargo, and sccache
+        id: proof
+        run: |
+          set -euo pipefail
+          test -x upstream/target/release/zed
+          descriptor=upstream/target/.boringcache/cargo-freshness-v2.json
+          test -s "$descriptor"
+          jq -e '.format_version == 2 and .source_identity == "git-index-v2" and (.entries | length) > 0' "$descriptor"
+          git -C upstream diff --quiet
+
+          counts="$(sed -nE 's/.*restored: ([0-9,]+) unchanged, ([0-9,]+) changed\/new;.*/\1 \2/p' /tmp/zed-head-cli.log | tail -n1)"
+          read -r unchanged changed <<< "${counts//,/}"
+          [[ "${unchanged:-0}" -gt 0 ]]
+          [[ "${changed:-0}" -gt 0 ]]
+
+          fresh="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == true)] | length' /tmp/zed-head-cargo.jsonl)"
+          rebuilt="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == false)] | length' /tmp/zed-head-cargo.jsonl)"
+          [[ "$fresh" -gt 0 ]]
+          [[ "$rebuilt" -gt 0 ]]
+          jq -e '.tool == "sccache" and (.cache_read_errors // 0) == 0 and (.cache_write_errors // 0) == 0 and (.cache_timeouts // 0) == 0' \
+            /tmp/zed-head-sccache.json
+
+          {
+            echo "unchanged=${unchanged}"
+            echo "changed=${changed}"
+            echo "fresh=${fresh}"
+            echo "rebuilt=${rebuilt}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish product proof summary
+        run: |
+          {
+            echo "## Zed Cargo product proof"
+            echo
+            echo "- CLI: \`${{ inputs.cli_version }}\`"
+            echo "- Source: \`${{ needs.publish-base.outputs.base_sha }}\` → \`${{ needs.publish-base.outputs.head_sha }}\`"
+            echo "- End to end: ${{ steps.build.outputs.elapsed_seconds }}s"
+            echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
+            echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
+            echo "- Target: signed \`archive-chunks-v1\`; sccache native evidence has no transport errors"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload head evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-cargo-product-head
+          path: |
+            /tmp/zed-head-cli.log
+            /tmp/zed-head-cargo.jsonl
+            /tmp/zed-head-sccache.json
+            /tmp/zed-head-target.json
+          if-no-files-found: error

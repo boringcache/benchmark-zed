@@ -9,6 +9,11 @@ on:
         required: false
         type: string
         default: ""
+      cargo_product:
+        description: "Run the CLI-owned Cargo target + sccache + freshness proof."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -17,6 +22,7 @@ permissions:
 jobs:
   dispatch:
     name: Run Zed canary
+    if: ${{ !inputs.cargo_product }}
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch isolated fresh benchmark
@@ -41,3 +47,11 @@ jobs:
           RUN_ID="${RUN_URL##*/}"
           echo "Canary benchmark: ${RUN_URL}"
           gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
+
+  cargo-product:
+    name: Run Zed Cargo product proof
+    if: ${{ inputs.cargo_product }}
+    uses: ./.github/workflows/zed-cargo-product.yml
+    with:
+      cli_version: ${{ inputs.cli_version }}
+    secrets: inherit
