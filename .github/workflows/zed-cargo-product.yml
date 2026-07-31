@@ -251,7 +251,16 @@ jobs:
           descriptor=upstream/target/.boringcache/cargo-freshness-v2.json
           test -s "$descriptor"
           jq -e '.format_version == 2 and .source_identity == "git-index-v2" and (.entries | length) > 0' "$descriptor"
-          git -C upstream diff --quiet
+          git -C upstream status --porcelain=v1 --untracked-files=all \
+            | tee /tmp/zed-head-source-status.txt
+          if [[ -s /tmp/zed-head-source-status.txt ]]; then
+            git -C upstream diff --no-ext-diff --name-status \
+              | tee /tmp/zed-head-source-name-status.txt
+            git -C upstream diff --no-ext-diff \
+              > /tmp/zed-head-source.diff
+            echo "The wrapped Cargo command changed the Zed source checkout" >&2
+            exit 1
+          fi
 
           counts="$(sed -nE 's/.*restored: ([0-9,]+) unchanged, ([0-9,]+) changed\/new;.*/\1 \2/p' /tmp/zed-head-cli.log | tail -n1)"
           read -r unchanged changed <<< "${counts//,/}"
@@ -292,6 +301,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload head evidence
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: zed-cargo-product-head
@@ -301,4 +311,7 @@ jobs:
             /tmp/zed-head-sccache.json
             /tmp/zed-head-target-check.json
             /tmp/zed-head-target.json
+            /tmp/zed-head-source-status.txt
+            /tmp/zed-head-source-name-status.txt
+            /tmp/zed-head-source.diff
           if-no-files-found: error
