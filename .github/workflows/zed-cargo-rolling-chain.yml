@@ -161,20 +161,26 @@ jobs:
             /tmp/zed-chain-head-inspect.json
           test "$(jq -r '.entry.id' /tmp/zed-chain-head-inspect.json)" != "${{ steps.base.outputs.entry_id }}"
 
-          jq -e '
-            .tool == "sccache" and
-            .compile_requests > 0 and
-            ((.cache_hits // 0) + (.cache_misses // 0)) > 0 and
-            (.cache_errors // 0) == 0 and
-            (.cache_read_errors // 0) == 0 and
-            (.cache_write_errors // 0) == 0 and
-            (.cache_timeouts // 0) == 0
-          ' /tmp/zed-chain-sccache.json
-
           counts="$(sed -nE 's/.*restored: ([0-9,]+) unchanged, ([0-9,]+) changed\/new;.*/\1 \2/p' /tmp/zed-chain-cli.log | tail -n 1)"
           read -r unchanged changed <<< "${counts//,/}"
           fresh="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == true)] | length' /tmp/zed-chain-cargo.jsonl)"
           rebuilt="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == false)] | length' /tmp/zed-chain-cargo.jsonl)"
+
+          jq -e --argjson rebuilt "$rebuilt" '
+            .tool == "sccache" and
+            (.cache_errors // 0) == 0 and
+            (.cache_read_errors // 0) == 0 and
+            (.cache_write_errors // 0) == 0 and
+            (.cache_timeouts // 0) == 0 and
+            (
+              $rebuilt == 0 or
+              (
+                (.compile_requests // 0) > 0 and
+                ((.cache_hits // 0) + (.cache_misses // 0)) > 0
+              )
+            )
+          ' /tmp/zed-chain-sccache.json
+
           # An adjacent docs or settings-only commit may correctly rebuild
           # nothing. Changed source identity and a new signed entry prove promotion.
           [[ "${unchanged:-0}" -gt 0 ]]
