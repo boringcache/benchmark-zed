@@ -175,10 +175,11 @@ jobs:
           read -r unchanged changed <<< "${counts//,/}"
           fresh="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == true)] | length' /tmp/zed-chain-cargo.jsonl)"
           rebuilt="$(jq -s '[.[] | select(.reason == "compiler-artifact" and .fresh == false)] | length' /tmp/zed-chain-cargo.jsonl)"
+          # An adjacent docs or settings-only commit may correctly rebuild
+          # nothing. Changed source identity and a new signed entry prove promotion.
           [[ "${unchanged:-0}" -gt 0 ]]
           [[ "${changed:-0}" -gt 0 ]]
           [[ "$fresh" -gt 0 ]]
-          [[ "$rebuilt" -gt 0 ]]
           {
             echo "unchanged=${unchanged}"
             echo "changed=${changed}"
