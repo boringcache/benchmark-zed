@@ -63,6 +63,11 @@ the CLI freshness descriptor to preserve unchanged source mtimes, keep changed
 sources new, make Cargo report both fresh and rebuilt artifacts, and exercise
 sccache without read errors or timeouts. Suppressed cache writes in the
 read-only rolling job are diagnostic counters, not remote-storage failures.
+The proof also preserves sccache's generic `Cache errors` counter as evidence
+without treating it alone as a storage failure, because sccache increments it
+for failed compiler/preprocessor feature probes as well as cache handling.
+`boringcache cargo --fail-on-cache-error` and the dedicated native and backend
+transport counters remain the cache-health boundary.
 
 ## Token Model
 
