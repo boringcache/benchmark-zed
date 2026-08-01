@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       cli_version:
-        description: "Exact immutable BoringCache CLI canary tag."
+        description: "Exact immutable BoringCache CLI release tag."
         required: true
         type: string
 
@@ -25,6 +25,7 @@ jobs:
     outputs:
       base_sha: ${{ steps.source.outputs.base_sha }}
       head_sha: ${{ steps.source.outputs.head_sha }}
+      transport: ${{ steps.archive.outputs.transport }}
     steps:
       - name: Validate BoringCache secrets
         env:
@@ -65,19 +66,13 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Install pinned Rust toolchain and exact CLI with BoringCache
-        uses: boringcache/one@95fa333f602bbcf131274118e6f025650912fba0 # v1.16.2
-        with:
-          cli-version: ${{ inputs.cli_version }}
-          trust-policy: restore
-          setup: mise
-          tools: rust@${{ env.PROJECT_RUST_VERSION }}
-          mode: archive
-          cache-profiles: rust-toolchain
-          working-directory: .
-          verify: none
-        env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      - name: Install the exact released BoringCache CLI
+        run: ./scripts/install-boringcache-cli.sh "${{ inputs.cli_version }}" linux-amd64
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install "$PROJECT_RUST_VERSION" --profile minimal
+          rustup default "$PROJECT_RUST_VERSION"
 
       - name: Free runner disk space
         run: ./scripts/free-runner-disk.sh
@@ -96,7 +91,6 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
-          BORINGCACHE_ARCHIVE_GRAPH_WRITES: "1"
         run: |
           set -euo pipefail
           started_at="$(date +%s)"
@@ -126,8 +120,9 @@ jobs:
           [[ -n "$target_tag" ]] || { echo "Published target did not resolve" >&2; exit 1; }
           boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-base-target.json
-          jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
+          jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
             /tmp/zed-base-target.json
+          echo "transport=$(jq -r '.entry.cas_layout // .entry.storage_mode' /tmp/zed-base-target.json)" >> "$GITHUB_OUTPUT"
           jq -e '
             .tool == "sccache"
             and .compile_requests > 0
@@ -186,19 +181,13 @@ jobs:
             libx11-dev libx11-xcb-dev libxcb1-dev \
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
-      - name: Install pinned Rust toolchain and exact CLI with BoringCache
-        uses: boringcache/one@95fa333f602bbcf131274118e6f025650912fba0 # v1.16.2
-        with:
-          cli-version: ${{ inputs.cli_version }}
-          trust-policy: restore
-          setup: mise
-          tools: rust@${{ env.PROJECT_RUST_VERSION }}
-          mode: archive
-          cache-profiles: rust-toolchain
-          working-directory: .
-          verify: none
-        env:
-          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+      - name: Install the exact released BoringCache CLI
+        run: ./scripts/install-boringcache-cli.sh "${{ inputs.cli_version }}" linux-amd64
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install "$PROJECT_RUST_VERSION" --profile minimal
+          rustup default "$PROJECT_RUST_VERSION"
 
       - name: Free runner disk space
         run: ./scripts/free-runner-disk.sh
@@ -220,14 +209,13 @@ jobs:
           [[ -n "$target_tag" ]] || { echo "Base target did not resolve" >&2; exit 1; }
           boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-head-target.json
-          jq -e '.entry.storage_mode == "cas" and .entry.cas_layout == "archive-chunks-v1" and .entry.server_signed and .entry.storage_verified and .entry.blob_count > 1' \
+          jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
             /tmp/zed-head-target.json
 
       - name: Restore and build through boringcache cargo
         id: build
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
-          BORINGCACHE_ARCHIVE_GRAPH_WRITES: "1"
         run: |
           set -euo pipefail
           started_at="$(date +%s)"
@@ -300,7 +288,7 @@ jobs:
             echo "- End to end: ${{ steps.build.outputs.elapsed_seconds }}s"
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
             echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
-            echo "- Target: signed \`archive-chunks-v1\`"
+            echo "- Target transport: authenticated \`${{ needs.publish-base.outputs.transport }}\` selected by the released CLI"
             echo "- sccache: ${{ steps.proof.outputs.generic_errors }} generic compiler/preprocessor errors reported, zero cache read/timeout failures; ${{ steps.proof.outputs.suppressed_writes }} read-only miss writes suppressed"
           } >> "$GITHUB_STEP_SUMMARY"
 

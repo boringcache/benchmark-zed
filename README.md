@@ -51,12 +51,14 @@ nested Zed checkout used by this benchmark.
 
 ## Cargo Product Proof
 
-The canary-only Cargo proof uses one product boundary for the complete Rust
-lifecycle. An exact immutable CLI runs `boringcache cargo --write` on the pinned
+The Cargo product proof uses one released product boundary for the complete
+Rust lifecycle. An exact immutable CLI runs `boringcache cargo --write` on the pinned
 base commit, then a fresh runner runs `boringcache cargo --read-only` on the
 adjacent head commit. The CLI owns target transport, source freshness, Cargo
 registry and Git state, and the sccache proxy in both jobs; the workflow only
-checks the signed `archive-chunks-v1` result and Cargo/native-tool evidence.
+checks the authenticated archive selected by that CLI and Cargo/native-tool
+evidence. Archive-layout rollout experiments remain separate from this normal
+product lane.
 
 This proof does not run the benchmark's Deno-derived mtime helper. It requires
 the CLI freshness descriptor to preserve unchanged source mtimes, keep changed

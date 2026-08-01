@@ -5,10 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       cli_version:
-        description: "Exact BoringCache CLI release tag. Empty selects the newest immutable CLI canary."
+        description: "Exact BoringCache CLI release tag."
         required: false
         type: string
-        default: ""
+        default: "v1.16.3"
       cargo_product:
         description: "Run the CLI-owned Cargo target + sccache + freshness proof."
         required: false
@@ -53,10 +53,7 @@ jobs:
           set -euo pipefail
 
           if [[ -z "$CLI_VERSION" ]]; then
-            CLI_VERSION="$(gh release list --repo boringcache/cli --limit 100 --json tagName,publishedAt --jq '[.[] | select(.tagName | startswith("vcli-canary-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')"
-          fi
-          if [[ -z "$CLI_VERSION" || "$CLI_VERSION" == "null" ]]; then
-            echo "::error::No immutable BoringCache CLI canary release was found."
+            echo "::error::An exact BoringCache CLI release is required."
             exit 1
           fi
 
