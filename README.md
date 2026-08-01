@@ -63,6 +63,9 @@ the CLI freshness descriptor to preserve unchanged source mtimes, keep changed
 sources new, make Cargo report both fresh and rebuilt artifacts, and exercise
 sccache without read errors or timeouts. Suppressed cache writes in the
 read-only rolling job are diagnostic counters, not remote-storage failures.
+It pins supported sccache 0.16.0 so the CLI's native WebDAV `READ_ONLY` mode
+suppresses miss publication before an artifact body reaches the local proxy;
+the proxy's own read-only policy remains the independent remote-write guard.
 The proof also preserves sccache's generic `Cache errors` counter as evidence
 without treating it alone as a storage failure, because sccache increments it
 for failed compiler/preprocessor feature probes as well as cache handling.
