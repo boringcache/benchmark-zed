@@ -275,16 +275,19 @@ jobs:
             .tool == "sccache"
             and .compile_requests > 0
             and ((.cache_hits // 0) + (.cache_misses // 0)) > 0
+            and (.cache_errors // 0) == 0
             and (.cache_read_errors // 0) == 0
             and (.cache_timeouts // 0) == 0
           ' \
             /tmp/zed-head-sccache.json
+          suppressed_writes="$(jq -r '.cache_write_errors // 0' /tmp/zed-head-sccache.json)"
 
           {
             echo "unchanged=${unchanged}"
             echo "changed=${changed}"
             echo "fresh=${fresh}"
             echo "rebuilt=${rebuilt}"
+            echo "suppressed_writes=${suppressed_writes}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish product proof summary
@@ -297,7 +300,8 @@ jobs:
             echo "- End to end: ${{ steps.build.outputs.elapsed_seconds }}s"
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
             echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
-            echo "- Target: signed \`archive-chunks-v1\`; sccache native evidence has no transport errors"
+            echo "- Target: signed \`archive-chunks-v1\`"
+            echo "- sccache: zero generic/read/timeout failures; ${{ steps.proof.outputs.suppressed_writes }} read-only miss writes suppressed"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload head evidence
