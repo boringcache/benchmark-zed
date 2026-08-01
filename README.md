@@ -49,6 +49,31 @@ The vendored implementation in `scripts/deno-mtime-cache-action.js` retains
 Deno's MIT copyright header. `scripts/run-mtime-cache.js` only adapts it to the
 nested Zed checkout used by this benchmark.
 
+## Cargo Product Proof
+
+The Cargo product proof uses one released product boundary for the complete
+Rust lifecycle. An exact immutable CLI runs `boringcache cargo --write` on the pinned
+base commit, then a fresh runner runs `boringcache cargo --read-only` on the
+adjacent head commit. The CLI owns target transport, source freshness, Cargo
+registry and Git state, and the sccache proxy in both jobs; the workflow only
+checks the authenticated archive selected by that CLI and Cargo/native-tool
+evidence. Archive-layout rollout experiments remain separate from this normal
+product lane.
+
+This proof does not run the benchmark's Deno-derived mtime helper. It requires
+the CLI freshness descriptor to preserve unchanged source mtimes, keep changed
+sources new, make Cargo report both fresh and rebuilt artifacts, and exercise
+sccache without read errors or timeouts. Suppressed cache writes in the
+read-only rolling job are diagnostic counters, not remote-storage failures.
+It pins supported sccache 0.16.0 so the CLI's native WebDAV `READ_ONLY` mode
+suppresses miss publication before an artifact body reaches the local proxy;
+the proxy's own read-only policy remains the independent remote-write guard.
+The proof also preserves sccache's generic `Cache errors` counter as evidence
+without treating it alone as a storage failure, because sccache increments it
+for failed compiler/preprocessor feature probes as well as cache handling.
+`boringcache cargo --fail-on-cache-error` and the dedicated native and backend
+transport counters remain the cache-health boundary.
+
 ## Token Model
 
 This repo uses split BoringCache tokens as the standard CI shape:

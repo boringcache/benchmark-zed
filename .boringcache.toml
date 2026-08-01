@@ -17,6 +17,7 @@ entries = ["cargo-registry", "cargo-git"]
 # sccache and Cargo dependency state remain shared by both consumers.
 
 [entries.zed-target]
+kind = "cargo-target"
 tag = "zed-target-local"
 path = "upstream/target"
 
@@ -30,3 +31,9 @@ tag = "zed-sccache-local"
 no-platform = true
 no-git = true
 profiles = ["cargo-deps"]
+
+[adapters.cargo]
+tag = "zed-sccache-local"
+profiles = ["zed-target"]
+no-git = true
+metadata-hints = ["benchmark=zed", "lane=cargo-product"]
