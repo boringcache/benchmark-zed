@@ -83,7 +83,7 @@ jobs:
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
       - name: Install pinned Rust toolchain and exact CLI with BoringCache
-        uses: boringcache/one@8294be671cd5a2b73638df1b8e1e240df888297e # v1.15.0
+        uses: boringcache/one@95fa333f602bbcf131274118e6f025650912fba0 # v1.16.2
         with:
           cli-version: ${{ inputs.cli_version }}
           trust-policy: restore
