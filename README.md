@@ -60,6 +60,12 @@ checks the authenticated archive selected by that CLI and Cargo/native-tool
 evidence. Archive-layout rollout experiments remain separate from this normal
 product lane.
 
+The adjacent-commit rolling chain also records target accumulation from the
+authenticated entries selected by that CLI. It compares stored and
+uncompressed bytes only when both entries use the same archive layout; a
+layout transition is reported explicitly instead of producing a false growth
+delta.
+
 This proof does not run the benchmark's Deno-derived mtime helper. It requires
 the CLI freshness descriptor to preserve unchanged source mtimes, keep changed
 sources new, make Cargo report both fresh and rebuilt artifacts, and exercise
