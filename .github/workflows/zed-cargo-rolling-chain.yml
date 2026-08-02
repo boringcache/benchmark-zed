@@ -22,7 +22,7 @@ on:
         description: Exact immutable BoringCache CLI release tag.
         required: true
         type: string
-        default: v1.16.3
+        default: v1.16.4
       cache_scope:
         description: Existing rolling scope whose target was published from base_sha.
         required: true
