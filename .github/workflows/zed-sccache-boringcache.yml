@@ -193,7 +193,7 @@ jobs:
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_seed_setup
-        uses: boringcache/one@b1d1e466317cde2d78a86f8cb94347deebb501e9 # v1.16.3
+        uses: boringcache/one@bf810e34331db84f9f11930e83b8813b5ad31ba1 # v1.16.4
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
@@ -499,7 +499,7 @@ jobs:
 
       - name: Configure boringcache/one for Rust sccache benchmark
         id: managed_scenario_setup
-        uses: boringcache/one@b1d1e466317cde2d78a86f8cb94347deebb501e9 # v1.16.3
+        uses: boringcache/one@bf810e34331db84f9f11930e83b8813b5ad31ba1 # v1.16.4
         with:
           setup: none
           cli-version: ${{ inputs.cli_version }}
