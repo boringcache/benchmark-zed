@@ -187,6 +187,62 @@ jobs:
             echo "rebuilt=${rebuilt}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Record target accumulation
+        id: target_growth
+        run: |
+          set -euo pipefail
+          jq -n \
+            --slurpfile base /tmp/zed-chain-base-inspect.json \
+            --slurpfile head /tmp/zed-chain-head-inspect.json '
+              def stored_bytes:
+                .stored_size_bytes // .compressed_size // .blob_total_size_bytes;
+              ($base[0].entry) as $before |
+              ($head[0].entry) as $after |
+              (($before.storage_mode == $after.storage_mode) and
+               (($before.cas_layout // null) == ($after.cas_layout // null))) as $comparable |
+              {
+                schema_version: "cargo_target_growth.v1",
+                comparable: $comparable,
+                reason: (if $comparable then null else "storage_layout_changed" end),
+                base: {
+                  entry_id: $before.id,
+                  storage_mode: $before.storage_mode,
+                  cas_layout: ($before.cas_layout // null),
+                  stored_size_bytes: ($before | stored_bytes),
+                  uncompressed_size_bytes: ($before.uncompressed_size // null)
+                },
+                head: {
+                  entry_id: $after.id,
+                  storage_mode: $after.storage_mode,
+                  cas_layout: ($after.cas_layout // null),
+                  stored_size_bytes: ($after | stored_bytes),
+                  uncompressed_size_bytes: ($after.uncompressed_size // null)
+                },
+                stored_size_bytes_delta: (
+                  if $comparable and (($before | stored_bytes) != null) and (($after | stored_bytes) != null)
+                  then ($after | stored_bytes) - ($before | stored_bytes)
+                  else null end
+                ),
+                uncompressed_size_bytes_delta: (
+                  if $comparable and ($before.uncompressed_size != null) and ($after.uncompressed_size != null)
+                  then $after.uncompressed_size - $before.uncompressed_size
+                  else null end
+                )
+              }
+            ' | tee /tmp/zed-chain-target-growth.json
+
+          jq -e '.schema_version == "cargo_target_growth.v1"' /tmp/zed-chain-target-growth.json
+          {
+            echo "comparable=$(jq -r '.comparable' /tmp/zed-chain-target-growth.json)"
+            echo "layout=$(jq -r '.head.storage_mode + (if .head.cas_layout then ":" + .head.cas_layout else "" end)' /tmp/zed-chain-target-growth.json)"
+            echo "stored_before=$(jq -r '.base.stored_size_bytes // "unavailable"' /tmp/zed-chain-target-growth.json)"
+            echo "stored_after=$(jq -r '.head.stored_size_bytes // "unavailable"' /tmp/zed-chain-target-growth.json)"
+            echo "stored_delta=$(jq -r '.stored_size_bytes_delta // "not-comparable"' /tmp/zed-chain-target-growth.json)"
+            echo "uncompressed_before=$(jq -r '.base.uncompressed_size_bytes // "unavailable"' /tmp/zed-chain-target-growth.json)"
+            echo "uncompressed_after=$(jq -r '.head.uncompressed_size_bytes // "unavailable"' /tmp/zed-chain-target-growth.json)"
+            echo "uncompressed_delta=$(jq -r '.uncompressed_size_bytes_delta // "unavailable"' /tmp/zed-chain-target-growth.json)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Publish rolling cadence summary
         run: |
           {
@@ -197,6 +253,9 @@ jobs:
             echo "- End to end: ${{ steps.build.outputs.elapsed_seconds }}s"
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
             echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
+            echo "- Target layout: ${{ steps.target_growth.outputs.layout }} (comparable=${{ steps.target_growth.outputs.comparable }})"
+            echo "- Target stored bytes: ${{ steps.target_growth.outputs.stored_before }} → ${{ steps.target_growth.outputs.stored_after }} (delta ${{ steps.target_growth.outputs.stored_delta }})"
+            echo "- Target uncompressed bytes: ${{ steps.target_growth.outputs.uncompressed_before }} → ${{ steps.target_growth.outputs.uncompressed_after }} (delta ${{ steps.target_growth.outputs.uncompressed_delta }})"
             echo "- The authenticated target selected by the released CLI was advanced in place and is the next rolling seed."
           } >> "$GITHUB_STEP_SUMMARY"
 
