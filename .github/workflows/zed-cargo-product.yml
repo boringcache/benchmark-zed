@@ -9,29 +9,6 @@ on:
         required: false
         type: string
         default: v1.16.4
-  workflow_dispatch:
-    inputs:
-      cli_version:
-        description: "Exact immutable BoringCache CLI release tag."
-        required: true
-        type: string
-        default: v1.16.4
-  push:
-    branches:
-      - main
-    paths:
-      - ".boringcache.toml"
-      - ".gitmodules"
-      - ".github/workflows/zed-cargo-product.yml"
-      - "scripts/**"
-      - "upstream"
-  pull_request:
-    paths:
-      - ".boringcache.toml"
-      - ".gitmodules"
-      - ".github/workflows/zed-cargo-product.yml"
-      - "scripts/**"
-      - "upstream"
   schedule:
     - cron: "0 4 * * 5"
 

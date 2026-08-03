@@ -40,6 +40,10 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: benchmark-zed-cargo-rolling-chain
+  cancel-in-progress: false
+
 env:
   BENCHMARK_WORKSPACE: boringcache/benchmark-zed
   PROJECT_RUST_VERSION: "1.95.0"

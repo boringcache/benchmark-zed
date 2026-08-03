@@ -6,6 +6,7 @@ on:
     - cron: "*/30 * * * *"
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -24,35 +25,70 @@ jobs:
           submodules: false
           token: ${{ secrets.BOT_PUBLIC_GITHUB_TOKEN }}
 
-      - name: Sync upstream submodule
+      - name: Require the previous rolling benchmark to be green
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PUBLIC_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git config --global user.name "boringcache-bot"
-          git config --global user.email "boringcache-bot@users.noreply.github.com"
+          source_commit="$(git log -1 --format=%H -- benchmark-source.env)"
+          run_json="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow zed-rust-cache-proof.yml \
+            --event push \
+            --commit "$source_commit" \
+            --limit 1 \
+            --json status,conclusion,url)"
 
+          if [[ "$(jq length <<<"$run_json")" -eq 0 ]]; then
+            echo "No rolling benchmark found for source commit ${source_commit}" >&2
+            exit 1
+          fi
+
+          status="$(jq -r '.[0].status' <<<"$run_json")"
+          conclusion="$(jq -r '.[0].conclusion // empty' <<<"$run_json")"
+          url="$(jq -r '.[0].url' <<<"$run_json")"
+          if [[ "$status" != "completed" ]]; then
+            echo "Waiting for ${url}"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$conclusion" != "success" ]]; then
+            echo "Previous rolling benchmark did not succeed: ${url}" >&2
+            exit 1
+          fi
+
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Advance the adjacent source pair
+        if: steps.previous.outputs.ready == 'true'
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PUBLIC_GITHUB_TOKEN }}
+        run: ./scripts/advance-source-pair.sh benchmark-source.env ZED
+
+      - name: Pin the adjacent Zed head
+        if: steps.previous.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          source benchmark-source.env
           git submodule sync --recursive
-          git submodule update --init --remote --checkout upstream
+          git submodule update --init --checkout upstream
+          git -C upstream fetch --no-tags --depth 1 origin "$ZED_HEAD_SHA"
+          git -C upstream checkout --detach "$ZED_HEAD_SHA"
+          test "$(git -C upstream rev-parse HEAD)" = "$ZED_HEAD_SHA"
 
-          github_repo_slug() {
-            local url="$1"
-            url="${url%/}"
-            url="${url#https://github.com/}"
-            url="${url#git@github.com:}"
-            url="${url#ssh://git@github.com/}"
-            url="${url%.git}"
-            url="${url%/}"
-            printf '%s' "$url"
-          }
-
-          upstream_url="$(cd upstream && git remote get-url origin)"
-          upstream_repo="$(github_repo_slug "$upstream_url")"
-          commit_sha="$(cd upstream && git rev-parse --short=7 HEAD)"
-
-          if git diff --quiet --submodule=short; then
+      - name: Commit the upstream update
+        if: steps.previous.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- benchmark-source.env upstream; then
             echo "No upstream changes"
             exit 0
           fi
 
-          git add upstream
-          git commit -m "Update upstream to ${upstream_repo}@${commit_sha}"
+          git config user.name "boringcache-bot"
+          git config user.email "boringcache-bot@users.noreply.github.com"
+          git add benchmark-source.env upstream
+          git commit -m "Update upstream to ${{ steps.source.outputs.source_repository }}@${{ steps.source.outputs.source_short_sha }}"
           git push origin HEAD:main
