@@ -1,12 +1,39 @@
 name: "Zed Cargo product proof"
+run-name: ${{ format('Zed Cargo fresh | CLI {0}', inputs.cli_version || 'v1.16.4') }}
 
 on:
   workflow_call:
     inputs:
       cli_version:
         description: "Exact immutable BoringCache CLI release tag."
+        required: false
+        type: string
+        default: v1.16.4
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: "Exact immutable BoringCache CLI release tag."
         required: true
         type: string
+        default: v1.16.4
+  push:
+    branches:
+      - main
+    paths:
+      - ".boringcache.toml"
+      - ".gitmodules"
+      - ".github/workflows/zed-cargo-product.yml"
+      - "scripts/**"
+      - "upstream"
+  pull_request:
+    paths:
+      - ".boringcache.toml"
+      - ".gitmodules"
+      - ".github/workflows/zed-cargo-product.yml"
+      - "scripts/**"
+      - "upstream"
+  schedule:
+    - cron: "0 4 * * 5"
 
 permissions:
   actions: read
@@ -14,6 +41,7 @@ permissions:
 
 env:
   BENCHMARK_WORKSPACE: boringcache/benchmark-zed
+  BORINGCACHE_CLI_VERSION: ${{ inputs.cli_version || 'v1.16.4' }}
   PROJECT_RUST_VERSION: "1.95.0"
   CACHE_SCOPE: zed-cargo-r${{ github.run_id }}-a${{ github.run_attempt }}
 
@@ -67,7 +95,7 @@ jobs:
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
       - name: Install the exact released BoringCache CLI
-        run: ./scripts/install-boringcache-cli.sh "${{ inputs.cli_version }}" linux-amd64
+        run: ./scripts/install-boringcache-cli.sh "$BORINGCACHE_CLI_VERSION" linux-amd64
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -182,7 +210,7 @@ jobs:
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
       - name: Install the exact released BoringCache CLI
-        run: ./scripts/install-boringcache-cli.sh "${{ inputs.cli_version }}" linux-amd64
+        run: ./scripts/install-boringcache-cli.sh "$BORINGCACHE_CLI_VERSION" linux-amd64
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -283,7 +311,7 @@ jobs:
           {
             echo "## Zed Cargo product proof"
             echo
-            echo "- CLI: \`${{ inputs.cli_version }}\`"
+            echo "- CLI: \`${BORINGCACHE_CLI_VERSION}\`"
             echo "- Source: \`${{ needs.publish-base.outputs.base_sha }}\` → \`${{ needs.publish-base.outputs.head_sha }}\`"
             echo "- End to end: ${{ steps.build.outputs.elapsed_seconds }}s"
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"

@@ -1,88 +1,49 @@
 # benchmark-zed
 
-Public Zed Rust `sccache` benchmark runner for BoringCache vs GitHub Actions cache.
+Zed correctness and rolling-reuse proof for the first-class BoringCache Cargo
+adapter.
 
-This repo exists separately from [`boringcache/benchmarks`](https://github.com/boringcache/benchmarks) so the benchmark keeps:
+The benchmark has one BoringCache product boundary:
 
-- one pinned upstream source commit
-- isolated GitHub Actions cache usage
-- one per-repo BoringCache workspace name: `boringcache/benchmark-zed`
-- independent workflow history plus upstream-sync-driven benchmark runs and manual dispatches
+```console
+boringcache cargo build --release --locked
+```
 
-## Source Model
+The released CLI owns Cargo registry and Git dependency state, the typed Cargo
+target snapshot, transported source freshness, native sccache, restore, native
+evidence, and publication. Workflows own only source preparation, the pinned
+toolchain, timing, and verification.
 
-- Upstream source lives in the pinned `upstream/` submodule.
+## Primary proof
 
-Pinned upstream source:
+`.github/workflows/zed-cargo-product.yml` is the automatic and manually
+dispatchable benchmark. It publishes the pinned base commit with
+`boringcache cargo --write`, then consumes that state on a fresh runner at the
+adjacent head with `boringcache cargo --read-only`.
 
-- see committed `upstream/` submodule on `main`
+The proof fails unless:
 
-## What It Measures
+- the target snapshot is authenticated and server-signed;
+- `cargo-freshness-v2.json` is present;
+- unchanged and changed source identities are both handled correctly;
+- Cargo reports both reused and rebuilt artifacts for the adjacent commit; and
+- native sccache reports requests without cache read errors or timeouts.
 
-Fresh lane runs a no-prior-cache cold build plus one warm rerun for each backend:
+`.github/workflows/zed-cargo-rolling-chain.yml` advances an existing signed
+Cargo target through one adjacent commit with the same CLI-owned lifecycle. It
+also records target accumulation only when the storage layout is comparable.
 
-- `cold`
-- `warm1`
+Historical `mode: sccache`, raw Cargo, Actions/cache, and benchmark-local mtime
+runner implementations remain available in Git and GitHub Actions history, but
+are not live workflow surfaces.
 
-Rolling lane records the upstream commit build as-is after each upstream sync against the prior rolling cache and intentionally skips `warm1`.
+## Source and tokens
 
-The story this benchmark is meant to show is:
+The pinned Zed checkout lives in the `upstream/` submodule. The sync workflow
+updates that gitlink; the Cargo product workflow runs automatically when it
+changes.
 
-- speed on fresh cold and warm paths
-- commit-build behavior on normal upstream syncs in the rolling lane
-- storage footprint in each backend
-- cache reuse through native `sccache` remote cache behavior
-- the immutable `boringcache/one` Rust `sccache` flow rather than benchmark-local proxy wiring
-- whether BoringCache can pair native `sccache` proxy hits with archived Cargo dependency state cleanly
+CI uses split tokens:
 
-Both BoringCache consumers restore Cargo registry and git dependency archives
-alongside the remote `sccache` population, matching the state restored by the
-Actions/cache control. The opt-in target consumer additionally restores
-`target/` concurrently. It runs Deno's content-keyed mtime-cache algorithm
-before the seed build and again after restore, preserving Cargo's source
-freshness contract across fresh checkouts: unchanged files regain their seed
-mtimes, while changed files keep a new mtime and rebuild normally. Without
-this ledger, a large target archive can restore successfully while Cargo still
-rejects most of it because the fresh checkout is newer than its fingerprints.
-
-The vendored implementation in `scripts/deno-mtime-cache-action.js` retains
-Deno's MIT copyright header. `scripts/run-mtime-cache.js` only adapts it to the
-nested Zed checkout used by this benchmark.
-
-## Cargo Product Proof
-
-The Cargo product proof uses one released product boundary for the complete
-Rust lifecycle. An exact immutable CLI runs `boringcache cargo --write` on the pinned
-base commit, then a fresh runner runs `boringcache cargo --read-only` on the
-adjacent head commit. The CLI owns target transport, source freshness, Cargo
-registry and Git state, and the sccache proxy in both jobs; the workflow only
-checks the authenticated archive selected by that CLI and Cargo/native-tool
-evidence. Archive-layout rollout experiments remain separate from this normal
-product lane.
-
-The adjacent-commit rolling chain also records target accumulation from the
-authenticated entries selected by that CLI. It compares stored and
-uncompressed bytes only when both entries use the same archive layout; a
-layout transition is reported explicitly instead of producing a false growth
-delta.
-
-This proof does not run the benchmark's Deno-derived mtime helper. It requires
-the CLI freshness descriptor to preserve unchanged source mtimes, keep changed
-sources new, make Cargo report both fresh and rebuilt artifacts, and exercise
-sccache without read errors or timeouts. Suppressed cache writes in the
-read-only rolling job are diagnostic counters, not remote-storage failures.
-It pins supported sccache 0.16.0 so the CLI's native WebDAV `READ_ONLY` mode
-suppresses miss publication before an artifact body reaches the local proxy;
-the proxy's own read-only policy remains the independent remote-write guard.
-The proof also preserves sccache's generic `Cache errors` counter as evidence
-without treating it alone as a storage failure, because sccache increments it
-for failed compiler/preprocessor feature probes as well as cache handling.
-`boringcache cargo --fail-on-cache-error` and the dedicated native and backend
-transport counters remain the cache-health boundary.
-
-## Token Model
-
-This repo uses split BoringCache tokens as the standard CI shape:
-
-- `BORINGCACHE_RESTORE_TOKEN` for read-only restore and proxy access
-- `BORINGCACHE_SAVE_TOKEN` for trusted write paths
+- `BORINGCACHE_RESTORE_TOKEN` for restore and read-only proxy access;
+- `BORINGCACHE_SAVE_TOKEN` for trusted publication.

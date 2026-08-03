@@ -10,10 +10,10 @@ on:
         type: string
         default: "v1.16.4"
       cargo_product:
-        description: "Run the CLI-owned Cargo target + sccache + freshness proof."
+        description: "Run the CLI-owned Cargo target + sccache + freshness proof. Retained for release-dispatch compatibility."
         required: false
         type: boolean
-        default: false
+        default: true
       cargo_rolling_chain:
         description: "Advance an existing CLI-owned Cargo target by one adjacent commit."
         required: false
@@ -36,38 +36,13 @@ on:
         default: ""
 
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 jobs:
-  dispatch:
-    name: Run Zed canary
-    if: ${{ !inputs.cargo_product && !inputs.cargo_rolling_chain }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch isolated fresh benchmark
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLI_VERSION: ${{ inputs.cli_version }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$CLI_VERSION" ]]; then
-            echo "::error::An exact BoringCache CLI release is required."
-            exit 1
-          fi
-
-          RUN_URL="$(gh workflow run zed-sccache-fresh-benchmark.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "${{ github.ref_name }}" \
-            -f "cli_version=${CLI_VERSION}")"
-          RUN_ID="${RUN_URL##*/}"
-          echo "Canary benchmark: ${RUN_URL}"
-          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
-
   cargo-product:
     name: Run Zed Cargo product proof
-    if: ${{ inputs.cargo_product }}
+    if: ${{ !inputs.cargo_rolling_chain }}
     uses: ./.github/workflows/zed-cargo-product.yml
     with:
       cli_version: ${{ inputs.cli_version }}
