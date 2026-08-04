@@ -63,4 +63,5 @@ jobs:
       cache_scope: ${{ inputs.cache_scope }}
       base_sha: ${{ inputs.base_sha }}
       head_sha: ${{ inputs.head_sha }}
+      archive_chunks_v2: ${{ inputs.archive_chunks_v2 }}
     secrets: inherit

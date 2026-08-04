@@ -16,6 +16,10 @@ on:
       head_sha:
         required: true
         type: string
+      archive_chunks_v2:
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       cli_version:
@@ -35,6 +39,11 @@ on:
         description: Immediate child commit to build and publish as the next seed.
         required: true
         type: string
+      archive_chunks_v2:
+        description: Require archive-chunks-v2 restore, partial save reuse, and successor publication.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -47,6 +56,8 @@ concurrency:
 env:
   BENCHMARK_WORKSPACE: boringcache/benchmark-zed
   PROJECT_RUST_VERSION: "1.95.0"
+  BORINGCACHE_ARCHIVE_CHUNKS_V2: ${{ inputs.archive_chunks_v2 && 'true' || 'false' }}
+  BORINGCACHE_ARCHIVE_GRAPH_WRITES: ${{ inputs.archive_chunks_v2 && '1' || '0' }}
 
 jobs:
   advance:
@@ -111,14 +122,27 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e upstream/target
-          boringcache check "$BENCHMARK_WORKSPACE" "${{ inputs.cache_scope }}-target" --no-git --json \
+          target_tag="$(./scripts/resolve-cargo-target-tag.sh \
+            upstream /tmp/zed-chain-base-plan.json \
+            build --release --locked --message-format=json-render-diagnostics)"
+          boringcache check "$BENCHMARK_WORKSPACE" "$target_tag" --no-git --json \
             | tee /tmp/zed-chain-base-check.json
           target_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-chain-base-check.json)"
           [[ -n "$target_tag" ]] || { echo "Published base target did not resolve" >&2; exit 1; }
           boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-chain-base-inspect.json
-          jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
-            /tmp/zed-chain-base-inspect.json
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            jq -e '
+              .entry.status == "ready"
+              and .entry.server_signed
+              and .entry.storage_mode == "cas"
+              and .entry.storage_verified
+              and .entry.cas_layout == "archive-chunks-v2"
+            ' /tmp/zed-chain-base-inspect.json
+          else
+            jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
+              /tmp/zed-chain-base-inspect.json
+          fi
           echo "entry_id=$(jq -r '.entry.id' /tmp/zed-chain-base-inspect.json)" >> "$GITHUB_OUTPUT"
 
       - name: Restore, build, and publish the adjacent head through boringcache cargo
@@ -150,14 +174,33 @@ jobs:
           test -s upstream/target/.boringcache/cargo-freshness-v2.json
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
-          boringcache check "$BENCHMARK_WORKSPACE" "${{ inputs.cache_scope }}-target" --no-git --json \
+          target_tag="$(./scripts/resolve-cargo-target-tag.sh \
+            upstream /tmp/zed-chain-head-plan.json \
+            build --release --locked --message-format=json-render-diagnostics)"
+          boringcache check "$BENCHMARK_WORKSPACE" "$target_tag" --no-git --json \
             | tee /tmp/zed-chain-head-check.json
           target_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-chain-head-check.json)"
           boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-chain-head-inspect.json
-          jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
-            /tmp/zed-chain-head-inspect.json
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            jq -e '
+              .entry.status == "ready"
+              and .entry.server_signed
+              and .entry.storage_mode == "cas"
+              and .entry.storage_verified
+              and .entry.cas_layout == "archive-chunks-v2"
+            ' /tmp/zed-chain-head-inspect.json
+          else
+            jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
+              /tmp/zed-chain-head-inspect.json
+          fi
           test "$(jq -r '.entry.id' /tmp/zed-chain-head-inspect.json)" != "${{ steps.base.outputs.entry_id }}"
+
+          archive_reuse="not requested"
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            archive_reuse="$(sed -nE 's/.*Reused ([1-9][0-9]*)\/([0-9]+) verified archive chunks \(([^)]+) encoded\).*/\1\/\2 (\3 encoded)/p' /tmp/zed-chain-cli.log | tail -n1)"
+            [[ -n "$archive_reuse" ]] || { echo "Rolling save did not report verified archive chunk reuse" >&2; exit 1; }
+          fi
 
           counts="$(sed -nE 's/.*restored: ([0-9,]+) unchanged, ([0-9,]+) changed\/new;.*/\1 \2/p' /tmp/zed-chain-cli.log | tail -n 1)"
           read -r unchanged changed <<< "${counts//,/}"
@@ -189,6 +232,7 @@ jobs:
             echo "changed=${changed}"
             echo "fresh=${fresh}"
             echo "rebuilt=${rebuilt}"
+            echo "archive_reuse=${archive_reuse}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Record target accumulation
@@ -270,6 +314,7 @@ jobs:
             echo "- End to end: ${{ steps.build.outputs.elapsed_seconds }}s"
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
             echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
+            echo "- Archive reuse: ${{ steps.proof.outputs.archive_reuse }}"
             echo "- Target layout: ${{ steps.target_growth.outputs.layout }} (comparable=${{ steps.target_growth.outputs.comparable }})"
             echo "- Target stored bytes: ${{ steps.target_growth.outputs.stored_before }} → ${{ steps.target_growth.outputs.stored_after }} (delta ${{ steps.target_growth.outputs.stored_delta }})"
             echo "- Target uncompressed bytes: ${{ steps.target_growth.outputs.uncompressed_before }} → ${{ steps.target_growth.outputs.uncompressed_after }} (delta ${{ steps.target_growth.outputs.uncompressed_delta }})"

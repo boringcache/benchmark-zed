@@ -126,7 +126,10 @@ jobs:
           test -x upstream/target/release/zed
           test -s upstream/target/.boringcache/cargo-freshness-v2.json
           git -C upstream diff --quiet
-          boringcache check "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --no-git --json \
+          target_tag="$(./scripts/resolve-cargo-target-tag.sh \
+            upstream /tmp/zed-base-target-plan.json \
+            build --release --locked --message-format=json-render-diagnostics)"
+          boringcache check "$BENCHMARK_WORKSPACE" "$target_tag" --no-git --json \
             | tee /tmp/zed-base-target-check.json
           target_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-base-target-check.json)"
           [[ -n "$target_tag" ]] || { echo "Published target did not resolve" >&2; exit 1; }
@@ -164,6 +167,7 @@ jobs:
             /tmp/zed-base-cli.log
             /tmp/zed-base-cargo.jsonl
             /tmp/zed-base-sccache.json
+            /tmp/zed-base-target-plan.json
             /tmp/zed-base-target-check.json
             /tmp/zed-base-target.json
           if-no-files-found: error
@@ -229,7 +233,10 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           test ! -e upstream/target
-          boringcache check "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --no-git --json \
+          target_tag="$(./scripts/resolve-cargo-target-tag.sh \
+            upstream /tmp/zed-head-target-plan.json \
+            build --release --locked --message-format=json-render-diagnostics)"
+          boringcache check "$BENCHMARK_WORKSPACE" "$target_tag" --no-git --json \
             | tee /tmp/zed-head-target-check.json
           target_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-head-target-check.json)"
           [[ -n "$target_tag" ]] || { echo "Base target did not resolve" >&2; exit 1; }
@@ -316,7 +323,10 @@ jobs:
             archive_reuse="$(sed -nE 's/.*Reused ([1-9][0-9]*)\/([0-9]+) verified archive chunks \(([^)]+) encoded\).*/\1\/\2 (\3 encoded)/p' /tmp/zed-head-cli.log | tail -n1)"
             [[ -n "$archive_reuse" ]] || { echo "Changed save did not report verified archive chunk reuse" >&2; exit 1; }
 
-            boringcache check "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --no-git --json \
+            successor_tag="$(./scripts/resolve-cargo-target-tag.sh \
+              upstream /tmp/zed-head-successor-target-plan.json \
+              build --release --locked --message-format=json-render-diagnostics)"
+            boringcache check "$BENCHMARK_WORKSPACE" "$successor_tag" --no-git --json \
               | tee /tmp/zed-head-successor-target-check.json
             successor_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-head-successor-target-check.json)"
             [[ -n "$successor_tag" ]] || { echo "Successor target did not resolve" >&2; exit 1; }
@@ -371,8 +381,10 @@ jobs:
             /tmp/zed-head-cli.log
             /tmp/zed-head-cargo.jsonl
             /tmp/zed-head-sccache.json
+            /tmp/zed-head-target-plan.json
             /tmp/zed-head-target-check.json
             /tmp/zed-head-target.json
+            /tmp/zed-head-successor-target-plan.json
             /tmp/zed-head-successor-target-check.json
             /tmp/zed-head-successor-target.json
             /tmp/zed-head-source-status.txt
