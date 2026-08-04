@@ -309,8 +309,10 @@ jobs:
             /tmp/zed-head-sccache.json
           generic_errors="$(jq -r '.cache_errors // 0' /tmp/zed-head-sccache.json)"
           suppressed_writes="$(jq -r '.cache_write_errors // 0' /tmp/zed-head-sccache.json)"
+          cache_policy="read-only"
           archive_reuse="not requested"
           if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            cache_policy="read-write successor"
             archive_reuse="$(sed -nE 's/.*Reused ([1-9][0-9]*)\/([0-9]+) verified archive chunks \(([^)]+) encoded\).*/\1\/\2 (\3 encoded)/p' /tmp/zed-head-cli.log | tail -n1)"
             [[ -n "$archive_reuse" ]] || { echo "Changed save did not report verified archive chunk reuse" >&2; exit 1; }
 
@@ -336,6 +338,7 @@ jobs:
             echo "rebuilt=${rebuilt}"
             echo "generic_errors=${generic_errors}"
             echo "suppressed_writes=${suppressed_writes}"
+            echo "cache_policy=${cache_policy}"
             echo "archive_reuse=${archive_reuse}"
           } >> "$GITHUB_OUTPUT"
 
@@ -350,8 +353,13 @@ jobs:
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
             echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
             echo "- Target transport: authenticated \`${{ needs.publish-base.outputs.transport }}\` selected by the released CLI"
+            echo "- Cache policy: ${{ steps.proof.outputs.cache_policy }}"
             echo "- Archive reuse: ${{ steps.proof.outputs.archive_reuse }}"
-            echo "- sccache: ${{ steps.proof.outputs.generic_errors }} generic compiler/preprocessor errors reported, zero cache read/timeout failures; ${{ steps.proof.outputs.suppressed_writes }} read-only miss writes suppressed"
+            if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+              echo "- sccache: ${{ steps.proof.outputs.generic_errors }} generic compiler/preprocessor errors and ${{ steps.proof.outputs.suppressed_writes }} cache write errors reported; zero cache read/timeout failures"
+            else
+              echo "- sccache: ${{ steps.proof.outputs.generic_errors }} generic compiler/preprocessor errors reported, zero cache read/timeout failures; ${{ steps.proof.outputs.suppressed_writes }} read-only miss writes suppressed"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload head evidence
