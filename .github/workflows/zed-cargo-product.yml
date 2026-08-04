@@ -9,6 +9,11 @@ on:
         required: false
         type: string
         default: v1.16.4
+      archive_chunks_v2:
+        description: "Require guarded archive-chunks-v2 publication, restore, and changed-save reuse."
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "0 4 * * 5"
 
@@ -19,6 +24,8 @@ permissions:
 env:
   BENCHMARK_WORKSPACE: boringcache/benchmark-zed
   BORINGCACHE_CLI_VERSION: ${{ inputs.cli_version || 'v1.16.4' }}
+  BORINGCACHE_ARCHIVE_CHUNKS_V2: ${{ inputs.archive_chunks_v2 && 'true' || 'false' }}
+  BORINGCACHE_ARCHIVE_GRAPH_WRITES: ${{ inputs.archive_chunks_v2 && '1' || '0' }}
   PROJECT_RUST_VERSION: "1.95.0"
   CACHE_SCOPE: zed-cargo-r${{ github.run_id }}-a${{ github.run_attempt }}
 
@@ -125,8 +132,18 @@ jobs:
           [[ -n "$target_tag" ]] || { echo "Published target did not resolve" >&2; exit 1; }
           boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-base-target.json
-          jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
-            /tmp/zed-base-target.json
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            jq -e '
+              .entry.status == "ready"
+              and .entry.server_signed
+              and .entry.storage_mode == "cas"
+              and .entry.storage_verified
+              and .entry.cas_layout == "archive-chunks-v2"
+            ' /tmp/zed-base-target.json
+          else
+            jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
+              /tmp/zed-base-target.json
+          fi
           echo "transport=$(jq -r '.entry.cas_layout // .entry.storage_mode' /tmp/zed-base-target.json)" >> "$GITHUB_OUTPUT"
           jq -e '
             .tool == "sccache"
@@ -157,11 +174,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - name: Validate BoringCache restore secret
+      - name: Validate BoringCache secrets
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
         run: |
           [[ -n "$BORINGCACHE_RESTORE_TOKEN" ]] || { echo "Missing BoringCache restore token" >&2; exit 1; }
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            [[ -n "$BORINGCACHE_SAVE_TOKEN" ]] || { echo "Missing BoringCache save token" >&2; exit 1; }
+          fi
 
       - name: Checkout benchmark repository
         uses: actions/checkout@v6
@@ -214,20 +235,35 @@ jobs:
           [[ -n "$target_tag" ]] || { echo "Base target did not resolve" >&2; exit 1; }
           boringcache inspect "$BENCHMARK_WORKSPACE" "$target_tag" --json \
             | tee /tmp/zed-head-target.json
-          jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
-            /tmp/zed-head-target.json
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            jq -e '
+              .entry.status == "ready"
+              and .entry.server_signed
+              and .entry.storage_mode == "cas"
+              and .entry.storage_verified
+              and .entry.cas_layout == "archive-chunks-v2"
+            ' /tmp/zed-head-target.json
+          else
+            jq -e '.entry.status == "ready" and .entry.server_signed and (.entry.storage_mode == "archive" or (.entry.storage_mode == "cas" and .entry.storage_verified))' \
+              /tmp/zed-head-target.json
+          fi
 
       - name: Restore and build through boringcache cargo
         id: build
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
         run: |
           set -euo pipefail
+          cache_mode=(--read-only)
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            cache_mode=(--write)
+          fi
           started_at="$(date +%s)"
           (
             cd upstream
             boringcache cargo \
-              --read-only \
+              "${cache_mode[@]}" \
               --fail-on-cache-error \
               --metadata-hint phase=head \
               --native-tool-evidence-json /tmp/zed-head-sccache.json \
@@ -273,6 +309,25 @@ jobs:
             /tmp/zed-head-sccache.json
           generic_errors="$(jq -r '.cache_errors // 0' /tmp/zed-head-sccache.json)"
           suppressed_writes="$(jq -r '.cache_write_errors // 0' /tmp/zed-head-sccache.json)"
+          archive_reuse="not requested"
+          if [[ "$BORINGCACHE_ARCHIVE_CHUNKS_V2" == "true" ]]; then
+            archive_reuse="$(sed -nE 's/.*Reused ([1-9][0-9]*)\/([0-9]+) verified archive chunks \(([^)]+) encoded\).*/\1\/\2 (\3 encoded)/p' /tmp/zed-head-cli.log | tail -n1)"
+            [[ -n "$archive_reuse" ]] || { echo "Changed save did not report verified archive chunk reuse" >&2; exit 1; }
+
+            boringcache check "$BENCHMARK_WORKSPACE" "${CACHE_SCOPE}-target" --no-git --json \
+              | tee /tmp/zed-head-successor-target-check.json
+            successor_tag="$(jq -r '.results[] | select(.status == "hit") | .tag' /tmp/zed-head-successor-target-check.json)"
+            [[ -n "$successor_tag" ]] || { echo "Successor target did not resolve" >&2; exit 1; }
+            boringcache inspect "$BENCHMARK_WORKSPACE" "$successor_tag" --json \
+              | tee /tmp/zed-head-successor-target.json
+            jq -e '
+              .entry.status == "ready"
+              and .entry.server_signed
+              and .entry.storage_mode == "cas"
+              and .entry.storage_verified
+              and .entry.cas_layout == "archive-chunks-v2"
+            ' /tmp/zed-head-successor-target.json
+          fi
 
           {
             echo "unchanged=${unchanged}"
@@ -281,6 +336,7 @@ jobs:
             echo "rebuilt=${rebuilt}"
             echo "generic_errors=${generic_errors}"
             echo "suppressed_writes=${suppressed_writes}"
+            echo "archive_reuse=${archive_reuse}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish product proof summary
@@ -294,6 +350,7 @@ jobs:
             echo "- Source freshness: ${{ steps.proof.outputs.unchanged }} unchanged, ${{ steps.proof.outputs.changed }} changed/new"
             echo "- Cargo artifacts: ${{ steps.proof.outputs.fresh }} fresh, ${{ steps.proof.outputs.rebuilt }} rebuilt"
             echo "- Target transport: authenticated \`${{ needs.publish-base.outputs.transport }}\` selected by the released CLI"
+            echo "- Archive reuse: ${{ steps.proof.outputs.archive_reuse }}"
             echo "- sccache: ${{ steps.proof.outputs.generic_errors }} generic compiler/preprocessor errors reported, zero cache read/timeout failures; ${{ steps.proof.outputs.suppressed_writes }} read-only miss writes suppressed"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -308,6 +365,8 @@ jobs:
             /tmp/zed-head-sccache.json
             /tmp/zed-head-target-check.json
             /tmp/zed-head-target.json
+            /tmp/zed-head-successor-target-check.json
+            /tmp/zed-head-successor-target.json
             /tmp/zed-head-source-status.txt
             /tmp/zed-head-source-name-status.txt
             /tmp/zed-head-source.diff

@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: true
+      archive_chunks_v2:
+        description: "Require guarded archive-chunks-v2 mutation reuse in the Cargo product proof."
+        required: false
+        type: boolean
+        default: false
       cargo_rolling_chain:
         description: "Advance an existing CLI-owned Cargo target by one adjacent commit."
         required: false
@@ -46,6 +51,7 @@ jobs:
     uses: ./.github/workflows/zed-cargo-product.yml
     with:
       cli_version: ${{ inputs.cli_version }}
+      archive_chunks_v2: ${{ inputs.archive_chunks_v2 }}
     secrets: inherit
 
   cargo-rolling-chain:
