@@ -10,7 +10,7 @@ on:
         type: string
         default: "v1.16.4"
       cargo_product:
-        description: "Run the CLI-owned Cargo target + sccache + freshness proof. Retained for release-dispatch compatibility."
+        description: "Run Zed through the released Cargo product. Retained for release-dispatch compatibility."
         required: false
         type: boolean
         default: true
@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   cargo-product:
-    name: Run Zed Cargo product proof
+    name: Run Zed Cargo product
     if: ${{ !inputs.cargo_rolling_chain }}
     uses: ./.github/workflows/zed-cargo-product.yml
     with:
