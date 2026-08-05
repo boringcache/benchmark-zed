@@ -2,15 +2,26 @@ name: "Zed Cargo product run"
 run-name: ${{ format('Zed Cargo fresh | CLI {0}', inputs.cli_version || 'Action default') }}
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       cli_version:
         description: "Exact immutable BoringCache CLI release tag."
         required: false
         type: string
         default: ""
+      runner_label:
+        description: Optional runner label for a manual main-branch experiment.
+        required: false
+        type: string
+        default: ""
   schedule:
     - cron: "0 4 * * 5"
+  pull_request:
+    paths:
+      - ".github/workflows/zed-cargo-product.yml"
+      - ".gitmodules"
+      - "scripts/**"
+      - "upstream"
 
 permissions:
   actions: read
@@ -23,8 +34,9 @@ env:
 
 jobs:
   publish-base:
-    name: Publish adjacent base
-    runs-on: ubuntu-24.04
+    name: BoringCache Zed Cargo cold
+    if: inputs.runner_label == '' || github.ref_name == 'main'
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     outputs:
       base_sha: ${{ steps.source.outputs.base_sha }}
@@ -104,9 +116,9 @@ jobs:
           if-no-files-found: error
 
   consume-head:
-    name: Restore adjacent head
+    name: BoringCache Zed Cargo warm
     needs: publish-base
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     steps:
       - name: Checkout benchmark repository

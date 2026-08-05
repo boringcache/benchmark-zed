@@ -1,22 +1,10 @@
 name: "Zed Cargo rolling run"
-run-name: Zed Cargo rolling ${{ inputs.base_sha }} to ${{ inputs.head_sha }}
+run-name: ${{ github.event_name == 'push' && 'Zed Cargo rolling pinned source update' || format('Zed Cargo rolling {0} to {1}', inputs.base_sha, inputs.head_sha) }}
 
 on:
-  workflow_call:
-    inputs:
-      cli_version:
-        required: false
-        type: string
-        default: ""
-      cache_scope:
-        required: true
-        type: string
-      base_sha:
-        required: true
-        type: string
-      head_sha:
-        required: true
-        type: string
+  push:
+    branches: [main]
+    paths: ["benchmark-source.env"]
   workflow_dispatch:
     inputs:
       cli_version:
@@ -36,6 +24,11 @@ on:
         description: Immediate child commit to build and publish as the next seed.
         required: true
         type: string
+      runner_label:
+        description: Optional runner label for a manual main-branch experiment.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   actions: read
@@ -49,10 +42,29 @@ env:
   PROJECT_RUST_VERSION: "1.95.0"
 
 jobs:
-  advance:
-    name: Restore base and publish adjacent head
+  source:
+    name: Resolve Zed source
     runs-on: ubuntu-24.04
+    outputs:
+      base_sha: ${{ steps.source.outputs.ZED_BASE_SHA }}
+      head_sha: ${{ steps.source.outputs.ZED_HEAD_SHA }}
+      cache_scope: ${{ steps.source.outputs.ZED_ROLLING_CACHE_SCOPE }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read pinned source
+        id: source
+        run: sed '/^$/d' benchmark-source.env >> "$GITHUB_OUTPUT"
+
+  advance:
+    name: BoringCache Zed Cargo commit
+    needs: source
+    if: inputs.runner_label == '' || github.ref_name == 'main'
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
+    env:
+      RESOLVED_BASE_SHA: ${{ github.event_name == 'push' && needs.source.outputs.base_sha || inputs.base_sha }}
+      RESOLVED_HEAD_SHA: ${{ github.event_name == 'push' && needs.source.outputs.head_sha || inputs.head_sha }}
+      RESOLVED_CACHE_SCOPE: ${{ github.event_name == 'push' && needs.source.outputs.cache_scope || inputs.cache_scope }}
     steps:
       - name: Checkout benchmark repository
         uses: actions/checkout@v6
@@ -62,10 +74,10 @@ jobs:
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
-          git -C upstream fetch --no-tags --depth 2 origin "${{ inputs.head_sha }}"
-          git -C upstream checkout --detach "${{ inputs.head_sha }}"
-          test "$(git -C upstream rev-parse HEAD)" = "${{ inputs.head_sha }}"
-          test "$(git -C upstream rev-parse HEAD^)" = "${{ inputs.base_sha }}"
+          git -C upstream fetch --no-tags --depth 2 origin "$RESOLVED_HEAD_SHA"
+          git -C upstream checkout --detach "$RESOLVED_HEAD_SHA"
+          test "$(git -C upstream rev-parse HEAD)" = "$RESOLVED_HEAD_SHA"
+          test "$(git -C upstream rev-parse HEAD^)" = "$RESOLVED_BASE_SHA"
           git -C upstream clean -fdx
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
@@ -88,7 +100,7 @@ jobs:
         run: ./scripts/free-runner-disk.sh
 
       - name: Scope the persistent Cargo product chain
-        run: ./scripts/scope-boringcache-run.sh "${{ inputs.cache_scope }}"
+        run: ./scripts/scope-boringcache-run.sh "$RESOLVED_CACHE_SCOPE"
 
       - name: Require an empty destination
         run: test ! -e upstream/target
@@ -120,13 +132,13 @@ jobs:
             echo "## Zed Cargo rolling run"
             echo
             echo "- CLI: \`${{ inputs.cli_version }}\`"
-            echo "- Source: \`${{ inputs.base_sha }}\` → \`${{ inputs.head_sha }}\`"
+            echo "- Source: \`${RESOLVED_BASE_SHA}\` → \`${RESOLVED_HEAD_SHA}\`"
             echo "- Signed target available before the adjacent build: \`${{ steps.cache.outputs.cache-hit }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain product evidence
         uses: actions/upload-artifact@v6
         with:
-          name: zed-cargo-rolling-${{ inputs.head_sha }}
+          name: zed-cargo-rolling-${{ env.RESOLVED_HEAD_SHA }}
           path: ${{ steps.cache.outputs.evidence-path }}
           if-no-files-found: error
