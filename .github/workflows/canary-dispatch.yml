@@ -8,7 +8,7 @@ on:
         description: "Exact BoringCache CLI release tag."
         required: false
         type: string
-        default: "v1.16.4"
+        default: ""
       cargo_product:
         description: "Run Zed through the released Cargo product. Retained for release-dispatch compatibility."
         required: false

@@ -5,8 +5,9 @@ on:
   workflow_call:
     inputs:
       cli_version:
-        required: true
+        required: false
         type: string
+        default: ""
       cache_scope:
         required: true
         type: string
@@ -20,9 +21,9 @@ on:
     inputs:
       cli_version:
         description: Exact immutable BoringCache CLI release tag.
-        required: true
+        required: false
         type: string
-        default: v1.16.4
+        default: ""
       cache_scope:
         description: Existing rolling scope whose target was published from base_sha.
         required: true

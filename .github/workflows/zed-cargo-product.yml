@@ -1,5 +1,5 @@
 name: "Zed Cargo product run"
-run-name: ${{ format('Zed Cargo fresh | CLI {0}', inputs.cli_version || 'v1.16.4') }}
+run-name: ${{ format('Zed Cargo fresh | CLI {0}', inputs.cli_version || 'Action default') }}
 
 on:
   workflow_call:
@@ -8,7 +8,7 @@ on:
         description: "Exact immutable BoringCache CLI release tag."
         required: false
         type: string
-        default: v1.16.4
+        default: ""
   schedule:
     - cron: "0 4 * * 5"
 
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  BORINGCACHE_CLI_VERSION: ${{ inputs.cli_version || 'v1.16.4' }}
+  BORINGCACHE_CLI_VERSION: ${{ inputs.cli_version }}
   PROJECT_RUST_VERSION: "1.95.0"
   CACHE_SCOPE: zed-cargo-r${{ github.run_id }}-a${{ github.run_attempt }}
 

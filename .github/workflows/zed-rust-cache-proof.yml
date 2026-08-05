@@ -1,5 +1,5 @@
 name: "Zed Cargo benchmark"
-run-name: Zed cargo-rolling-chain | CLI v1.16.4
+run-name: Zed cargo-rolling-chain | CLI Action default
 
 on:
   push:
@@ -33,7 +33,6 @@ jobs:
     needs: source
     uses: ./.github/workflows/zed-cargo-rolling-chain.yml
     with:
-      cli_version: v1.16.4
       cache_scope: ${{ needs.source.outputs.cache_scope }}
       base_sha: ${{ needs.source.outputs.base_sha }}
       head_sha: ${{ needs.source.outputs.head_sha }}
