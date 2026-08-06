@@ -45,12 +45,22 @@ jobs:
     outputs:
       base_sha: ${{ steps.source.outputs.ZED_BASE_SHA }}
       head_sha: ${{ steps.source.outputs.ZED_HEAD_SHA }}
-      cache_scope: ${{ steps.source.outputs.ZED_ROLLING_CACHE_SCOPE }}
+      cache_scope: ${{ steps.scope.outputs.cache_scope }}
     steps:
       - uses: actions/checkout@v6
       - name: Read pinned source
         id: source
         run: sed '/^$/d' benchmark-source.env >> "$GITHUB_OUTPUT"
+
+      - name: Name the rolling cohort
+        id: scope
+        run: |
+          set -euo pipefail
+          ref_slug="$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+          ref_slug="${ref_slug#-}"
+          ref_slug="${ref_slug%-}"
+          ref_slug="${ref_slug:-main}"
+          echo "cache_scope=zed-cargo-rolling-${ref_slug}" >> "$GITHUB_OUTPUT"
 
   advance:
     name: BoringCache Zed Cargo commit
