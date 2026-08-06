@@ -3,7 +3,7 @@ name: "Sync Upstream"
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "28,58 * * * *"
 
 permissions:
   actions: read
