@@ -280,6 +280,8 @@ jobs:
 
       - name: Verify target, source freshness, Cargo, and sccache
         id: proof
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
         run: |
           set -euo pipefail
           test -x upstream/target/release/zed
