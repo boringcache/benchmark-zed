@@ -63,6 +63,10 @@ jobs:
       RESOLVED_HEAD_SHA: ${{ github.event_name == 'push' && needs.source.outputs.head_sha || inputs.head_sha }}
       RESOLVED_CACHE_SCOPE: ${{ github.event_name == 'push' && needs.source.outputs.cache_scope || inputs.cache_scope }}
     steps:
+      - name: Start the workflow timer
+        id: workflow_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      
       - name: Checkout benchmark repository
         uses: actions/checkout@v6
 
@@ -106,6 +110,10 @@ jobs:
       - name: Require an empty destination
         run: test ! -e upstream/target
 
+      - name: Start the build timer
+        id: build_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      
       - name: Run the released Cargo product
         id: cache
         uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1 / 1.17.0
@@ -121,12 +129,59 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 
+      - name: Capture the build timing
+        id: build_timing
+        env:
+          BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
+        run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
+      
       - name: Verify the Zed build
         run: |
           set -euo pipefail
           test -x upstream/target/release/zed
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
+      - name: Write the benchmark phase evidence
+        env:
+          WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
+          BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_TAG: ${{ steps.cache.outputs.cache-tag }}
+          CACHE_WORKSPACE: ${{ steps.cache.outputs.workspace }}
+          EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
+          SOURCE_SHA: ${{ env.RESOLVED_HEAD_SHA }}
+        run: |
+          set -euo pipefail
+          source_url="$(git config -f .gitmodules submodule.upstream.url)"
+          python3 ./scripts/benchmark-report.py phase \
+            --benchmark zed-cargo \
+            --strategy boringcache \
+            --lane rolling \
+            --phase commit \
+            --mode cargo \
+            --build-seconds "$BUILD_SECONDS" \
+            --workflow-seconds "$(( $(date +%s) - WORKFLOW_STARTED_AT ))" \
+            --cache-hit "$CACHE_HIT" \
+            --cache-tag "$CACHE_TAG" \
+            --workspace "$CACHE_WORKSPACE" \
+            --source-repository "$(printf '%s' "${source_url#https://github.com/}" | sed 's/\.git$//')" \
+            --source-sha "$SOURCE_SHA" \
+            --evidence "$EVIDENCE_PATH"
+      
+      - name: Publish the Zed Cargo rolling benchmark report
+        run: |
+          python3 ./scripts/benchmark-report.py summarize \
+            --title "Zed Cargo rolling benchmark" \
+            --input-dir benchmark-results \
+            --output-dir benchmark-results
+      
+      - name: Retain the Zed Cargo rolling result
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-zed-cargo-boringcache-rolling
+          path: benchmark-results/zed-cargo-boringcache-rolling.json
+          if-no-files-found: error
+      
       - name: Publish rolling run summary
         run: |
           {

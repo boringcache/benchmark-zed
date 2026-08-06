@@ -41,6 +41,10 @@ jobs:
       base_sha: ${{ steps.source.outputs.base_sha }}
       head_sha: ${{ steps.source.outputs.head_sha }}
     steps:
+      - name: Start the workflow timer
+        id: workflow_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      
       - name: Checkout benchmark repository
         uses: actions/checkout@v6
 
@@ -90,6 +94,10 @@ jobs:
       - name: Require a cold target
         run: test ! -e upstream/target
 
+      - name: Start the build timer
+        id: build_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      
       - name: Run the released Cargo product
         id: cache
         uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1 / 1.17.0
@@ -105,12 +113,52 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
 
+      - name: Capture the build timing
+        id: build_timing
+        env:
+          BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
+        run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
+      
       - name: Verify the Zed build
         run: |
           set -euo pipefail
           test -x upstream/target/release/zed
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
+      - name: Write the benchmark phase evidence
+        env:
+          WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
+          BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_TAG: ${{ steps.cache.outputs.cache-tag }}
+          CACHE_WORKSPACE: ${{ steps.cache.outputs.workspace }}
+          EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
+          SOURCE_SHA: ${{ steps.source.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          source_url="$(git config -f .gitmodules submodule.upstream.url)"
+          python3 ./scripts/benchmark-report.py phase \
+            --benchmark zed-cargo \
+            --strategy boringcache \
+            --lane fresh \
+            --phase cold \
+            --mode cargo \
+            --build-seconds "$BUILD_SECONDS" \
+            --workflow-seconds "$(( $(date +%s) - WORKFLOW_STARTED_AT ))" \
+            --cache-hit "$CACHE_HIT" \
+            --cache-tag "$CACHE_TAG" \
+            --workspace "$CACHE_WORKSPACE" \
+            --source-repository "$(printf '%s' "${source_url#https://github.com/}" | sed 's/\.git$//')" \
+            --source-sha "$SOURCE_SHA" \
+            --evidence "$EVIDENCE_PATH"
+      
+      - name: Retain the benchmark phase evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: phase-zed-cargo-boringcache-fresh-cold
+          path: benchmark-results/
+          if-no-files-found: error
+      
       - name: Retain base product evidence
         uses: actions/upload-artifact@v6
         with:
@@ -124,6 +172,10 @@ jobs:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     steps:
+      - name: Start the workflow timer
+        id: workflow_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      
       - name: Checkout benchmark repository
         uses: actions/checkout@v6
 
@@ -165,6 +217,10 @@ jobs:
       - name: Require an empty destination
         run: test ! -e upstream/target
 
+      - name: Start the build timer
+        id: build_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      
       - name: Run the released Cargo product
         id: cache
         uses: boringcache/one@b372edd91cda127cb03c64967df35c3836d47f2a # v1 / 1.17.0
@@ -180,12 +236,52 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
 
+      - name: Capture the build timing
+        id: build_timing
+        env:
+          BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
+        run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
+      
       - name: Verify the Zed build
         run: |
           set -euo pipefail
           test -x upstream/target/release/zed
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
+      - name: Write the benchmark phase evidence
+        env:
+          WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
+          BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_TAG: ${{ steps.cache.outputs.cache-tag }}
+          CACHE_WORKSPACE: ${{ steps.cache.outputs.workspace }}
+          EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
+          SOURCE_SHA: ${{ needs.publish-base.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          source_url="$(git config -f .gitmodules submodule.upstream.url)"
+          python3 ./scripts/benchmark-report.py phase \
+            --benchmark zed-cargo \
+            --strategy boringcache \
+            --lane fresh \
+            --phase warm \
+            --mode cargo \
+            --build-seconds "$BUILD_SECONDS" \
+            --workflow-seconds "$(( $(date +%s) - WORKFLOW_STARTED_AT ))" \
+            --cache-hit "$CACHE_HIT" \
+            --cache-tag "$CACHE_TAG" \
+            --workspace "$CACHE_WORKSPACE" \
+            --source-repository "$(printf '%s' "${source_url#https://github.com/}" | sed 's/\.git$//')" \
+            --source-sha "$SOURCE_SHA" \
+            --evidence "$EVIDENCE_PATH"
+      
+      - name: Retain the benchmark phase evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: phase-zed-cargo-boringcache-fresh-warm
+          path: benchmark-results/
+          if-no-files-found: error
+      
       - name: Publish product run summary
         run: |
           {
@@ -201,4 +297,32 @@ jobs:
         with:
           name: zed-cargo-product-head
           path: ${{ steps.cache.outputs.evidence-path }}
+          if-no-files-found: error
+
+  report:
+    name: Zed Cargo fresh report
+    needs: consume-head
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download the benchmark phase evidence
+        uses: actions/download-artifact@v6
+        with:
+          pattern: phase-zed-cargo-*
+          path: phase-evidence
+
+      - name: Publish the Zed Cargo fresh benchmark report
+        run: |
+          python3 ./scripts/benchmark-report.py summarize \
+            --title "Zed Cargo fresh benchmark" \
+            --input-dir phase-evidence \
+            --output-dir benchmark-results
+
+      - name: Retain the Zed Cargo fresh result
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-zed-cargo-boringcache-fresh
+          path: benchmark-results/zed-cargo-boringcache-fresh.json
           if-no-files-found: error
