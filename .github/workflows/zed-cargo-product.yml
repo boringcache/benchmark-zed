@@ -136,7 +136,7 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.base_sha }}
         run: |
           set -euo pipefail
-          source_url="$(git config -f .gitmodules submodule.upstream.url)"
+          source_repository="$(sed -n 's/^ZED_SOURCE_REPOSITORY=//p' benchmark-source.env)"
           python3 ./scripts/benchmark-report.py phase \
             --benchmark zed-cargo \
             --strategy boringcache \
@@ -148,7 +148,7 @@ jobs:
             --cache-hit "$CACHE_HIT" \
             --cache-tag "$CACHE_TAG" \
             --workspace "$CACHE_WORKSPACE" \
-            --source-repository "$(printf '%s' "${source_url#https://github.com/}" | sed 's/\.git$//')" \
+            --source-repository "$source_repository" \
             --source-sha "$SOURCE_SHA" \
             --evidence "$EVIDENCE_PATH"
       
@@ -259,7 +259,7 @@ jobs:
           SOURCE_SHA: ${{ needs.publish-base.outputs.head_sha }}
         run: |
           set -euo pipefail
-          source_url="$(git config -f .gitmodules submodule.upstream.url)"
+          source_repository="$(sed -n 's/^ZED_SOURCE_REPOSITORY=//p' benchmark-source.env)"
           python3 ./scripts/benchmark-report.py phase \
             --benchmark zed-cargo \
             --strategy boringcache \
@@ -271,7 +271,7 @@ jobs:
             --cache-hit "$CACHE_HIT" \
             --cache-tag "$CACHE_TAG" \
             --workspace "$CACHE_WORKSPACE" \
-            --source-repository "$(printf '%s' "${source_url#https://github.com/}" | sed 's/\.git$//')" \
+            --source-repository "$source_repository" \
             --source-sha "$SOURCE_SHA" \
             --evidence "$EVIDENCE_PATH"
       

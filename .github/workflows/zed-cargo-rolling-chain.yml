@@ -46,6 +46,7 @@ jobs:
       base_sha: ${{ steps.source.outputs.ZED_BASE_SHA }}
       head_sha: ${{ steps.source.outputs.ZED_HEAD_SHA }}
       cache_scope: ${{ steps.scope.outputs.cache_scope }}
+      source_repository: ${{ steps.source.outputs.ZED_SOURCE_REPOSITORY }}
     steps:
       - uses: actions/checkout@v6
       - name: Read pinned source
@@ -159,10 +160,10 @@ jobs:
           CACHE_TAG: ${{ steps.cache.outputs.cache-tag }}
           CACHE_WORKSPACE: ${{ steps.cache.outputs.workspace }}
           EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
+          SOURCE_REPOSITORY: ${{ needs.source.outputs.source_repository }}
           SOURCE_SHA: ${{ env.RESOLVED_HEAD_SHA }}
         run: |
           set -euo pipefail
-          source_url="$(git config -f .gitmodules submodule.upstream.url)"
           python3 ./scripts/benchmark-report.py phase \
             --benchmark zed-cargo \
             --strategy boringcache \
@@ -174,7 +175,7 @@ jobs:
             --cache-hit "$CACHE_HIT" \
             --cache-tag "$CACHE_TAG" \
             --workspace "$CACHE_WORKSPACE" \
-            --source-repository "$(printf '%s' "${source_url#https://github.com/}" | sed 's/\.git$//')" \
+            --source-repository "$SOURCE_REPOSITORY" \
             --source-sha "$SOURCE_SHA" \
             --evidence "$EVIDENCE_PATH"
       
