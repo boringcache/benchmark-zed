@@ -1,5 +1,5 @@
 name: "Zed Cargo Actions control"
-run-name: ${{ format('Zed Cargo actions/cache control | {0} to {1}', inputs.base_sha, inputs.head_sha) }}
+run-name: "Zed Cargo actions/cache control"
 
 # The BoringCache lanes have never had an in-run comparator, unlike the Deno
 # benchmark. This lane runs Zed's exact release commands on the same runner
@@ -11,16 +11,20 @@ run-name: ${{ format('Zed Cargo actions/cache control | {0} to {1}', inputs.base
 # error, so the save is recorded rather than fatal.
 
 on:
+  push:
+    branches: ["claude/zed-deno-benchmark-compare-w2u0d8"]
   workflow_dispatch:
     inputs:
       base_sha:
-        description: Source commit to seed the cache from.
-        required: true
+        description: Source commit to seed the cache from. Defaults to benchmark-source.env.
+        required: false
         type: string
+        default: ""
       head_sha:
-        description: Immediate child commit to build against the restored cache.
-        required: true
+        description: Immediate child commit to build against. Defaults to benchmark-source.env.
+        required: false
         type: string
+        default: ""
 
 permissions:
   actions: write
@@ -31,12 +35,36 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CACHE_KEY: zed-actions-control-${{ inputs.base_sha }}
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  source:
+    name: Resolve Zed source
+    runs-on: ubuntu-24.04
+    outputs:
+      base_sha: ${{ steps.pick.outputs.base_sha }}
+      head_sha: ${{ steps.pick.outputs.head_sha }}
+      cache_key: ${{ steps.pick.outputs.cache_key }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Pick the pinned pair
+        id: pick
+        env:
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+          sed '/^$/d' benchmark-source.env > /tmp/source.env
+          . /tmp/source.env
+          base="${INPUT_BASE_SHA:-$ZED_BASE_SHA}"
+          head="${INPUT_HEAD_SHA:-$ZED_HEAD_SHA}"
+          echo "base_sha=${base}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${head}" >> "$GITHUB_OUTPUT"
+          echo "cache_key=zed-actions-control-${base}" >> "$GITHUB_OUTPUT"
+
   seed:
     name: Actions cache Zed Cargo cold
+    needs: source
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     outputs:
@@ -50,8 +78,8 @@ jobs:
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
-          git -C upstream fetch --no-tags --depth 2 origin "${{ inputs.base_sha }}"
-          git -C upstream checkout --detach "${{ inputs.base_sha }}"
+          git -C upstream fetch --no-tags --depth 2 origin "${{ needs.source.outputs.base_sha }}"
+          git -C upstream checkout --detach "${{ needs.source.outputs.base_sha }}"
           git -C upstream clean -fdx
 
       - name: Install system dependencies
@@ -107,7 +135,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
-          key: ${{ env.CACHE_KEY }}
+          key: ${{ needs.source.outputs.cache_key }}
           path: |
             upstream/target
             ~/.cargo/registry
@@ -128,7 +156,7 @@ jobs:
 
   rolling:
     name: Actions cache Zed Cargo commit
-    needs: seed
+    needs: [source, seed]
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -139,9 +167,9 @@ jobs:
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
-          git -C upstream fetch --no-tags --depth 2 origin "${{ inputs.head_sha }}"
-          git -C upstream checkout --detach "${{ inputs.head_sha }}"
-          test "$(git -C upstream rev-parse HEAD^)" = "${{ inputs.base_sha }}"
+          git -C upstream fetch --no-tags --depth 2 origin "${{ needs.source.outputs.head_sha }}"
+          git -C upstream checkout --detach "${{ needs.source.outputs.head_sha }}"
+          test "$(git -C upstream rev-parse HEAD^)" = "${{ needs.source.outputs.base_sha }}"
           git -C upstream clean -fdx
 
       - name: Install system dependencies
@@ -182,7 +210,7 @@ jobs:
         id: restore
         uses: actions/cache/restore@v4
         with:
-          key: ${{ env.CACHE_KEY }}
+          key: ${{ needs.source.outputs.cache_key }}
           path: |
             upstream/target
             ~/.cargo/registry
@@ -222,7 +250,7 @@ jobs:
           {
             echo "## Zed Cargo actions/cache control"
             echo
-            echo "- Source: \`${{ inputs.base_sha }}\` → \`${{ inputs.head_sha }}\`"
+            echo "- Source: \`${{ needs.source.outputs.base_sha }}\` → \`${{ needs.source.outputs.head_sha }}\`"
             echo "- Seed \`actions/cache/save\`: \`${SEED_SAVED}\` (tree $(numfmt --to=iec --suffix=B "$TARGET_BYTES"))"
             echo "- Rolling \`actions/cache\` hit: \`${CACHE_HIT:-false}\`"
             echo "- Rolling build: \`${BUILD_SECONDS}s\`"
