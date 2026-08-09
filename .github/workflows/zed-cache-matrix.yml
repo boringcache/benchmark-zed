@@ -281,20 +281,40 @@ jobs:
           EOF
           grep -A1 'profiles.cargo-product' .boringcache.toml
       - run: test ! -e upstream/target
-      - name: Start BoringCache sccache only
+      # mode sccache restores no archives, so this lane uses mode cargo with the
+      # target dropped from the profile: registry and git still restore, the
+      # target does not. Using mode sccache here would re-download every
+      # dependency and read as an sccache failure.
+      - id: t
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Build primary with sccache but no target
         uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
         with:
           setup: none
-          mode: sccache
+          mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-lane-d
+          metadata-hints: phase=matrix-lane-d-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
-      - id: t
-        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-      - run: ./scripts/run-zed-release-phases.sh
+          RUSTFLAGS: -C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib
+      - run: ./scripts/select-zed-cargo-phase.py remote-server
+      - name: Build remote_server with sccache but no target
+        uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
+        with:
+          setup: none
+          mode: cargo
+          trust-policy: restore
+          working-directory: upstream
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-lane-d-remote-server
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: -C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static
+          CC_x86_64_unknown_linux_musl: musl-gcc
       - run: echo "lane-d build_seconds=$(( $(date +%s) - ${{ steps.t.outputs.at }} ))" | tee -a "$GITHUB_STEP_SUMMARY"
