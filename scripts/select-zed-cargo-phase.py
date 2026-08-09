@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PHASES = ("primary", "remote-server")
+PHASES = ("primary", "remote-server", "probe")
 
 
 def read_settings(path: Path) -> dict[str, str]:
@@ -62,6 +62,11 @@ def cargo_command(settings: dict[str, str], phase: str) -> list[str]:
             "--package",
             settings["ZED_REMOTE_SERVER_PACKAGE"],
         ]
+    if phase == "probe":
+        # A no-op command so the adapter restores the profile without mutating
+        # the tree, which is the only way to manifest a BoringCache-restored
+        # target before Cargo touches it.
+        return ["cargo", "--version"]
     raise ValueError(f"Unknown Zed Cargo phase: {phase}")
 
 

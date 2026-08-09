@@ -11,8 +11,6 @@ run-name: "Zed Cargo actions/cache control"
 # error, so the save is recorded rather than fatal.
 
 on:
-  push:
-    branches: ["claude/zed-deno-benchmark-compare-w2u0d8"]
   workflow_dispatch:
     inputs:
       base_sha:
