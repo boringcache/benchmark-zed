@@ -23,4 +23,14 @@ tag = "zed-sccache-local"
 profiles = ["cargo-product"]
 no-git = true
 metadata-hints = ["benchmark=zed", "lane=cargo-product"]
-command = ["cargo", "build", "--release", "--locked", "--message-format=json-render-diagnostics"]
+command = [
+  "cargo",
+  "build",
+  "--release",
+  "--target",
+  "x86_64-unknown-linux-gnu",
+  "--package",
+  "zed",
+  "--package",
+  "cli",
+]

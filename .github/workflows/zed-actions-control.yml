@@ -1,0 +1,229 @@
+name: "Zed Cargo Actions control"
+run-name: ${{ format('Zed Cargo actions/cache control | {0} to {1}', inputs.base_sha, inputs.head_sha) }}
+
+# The BoringCache lanes have never had an in-run comparator, unlike the Deno
+# benchmark. This lane runs Zed's exact release commands on the same runner
+# class behind actions/cache instead of the Cargo product, so both sides can be
+# read from one pinned pair.
+#
+# Expect the seed save to fail: Zed's target tree measured 28.80 GB against
+# GitHub's 10 GB per-repository cache limit. That outcome is the result, not an
+# error, so the save is recorded rather than fatal.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Source commit to seed the cache from.
+        required: true
+        type: string
+      head_sha:
+        description: Immediate child commit to build against the restored cache.
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: benchmark-zed-actions-control
+  cancel-in-progress: false
+
+env:
+  CACHE_KEY: zed-actions-control-${{ inputs.base_sha }}
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  seed:
+    name: Actions cache Zed Cargo cold
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    outputs:
+      saved: ${{ steps.save.outcome }}
+      target_bytes: ${{ steps.measure.outputs.target_bytes }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout the pinned Zed base
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
+          git -C upstream fetch --no-tags --depth 2 origin "${{ inputs.base_sha }}"
+          git -C upstream checkout --detach "${{ inputs.base_sha }}"
+          git -C upstream clean -fdx
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libglib2.0-dev libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
+            musl-tools clang
+
+      - name: Install Zed's pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's/^channel = "\(.*\)"$/\1/p' upstream/rust-toolchain.toml)"
+          test -n "$pinned"
+          grep -Fxq "ZED_RUST_VERSION=${pinned}" benchmark-source.env
+          rustup toolchain install "$pinned" --profile minimal
+          rustup default "$pinned"
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Verify Zed release recipe
+        run: ./scripts/verify-zed-release-recipe.py upstream
+
+      - name: Mirror Zed's bundle release version
+        run: |
+          set -euo pipefail
+          version="$(cd upstream && script/get-crate-version zed)"
+          test -n "$version"
+          echo "RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Build Zed's release commands
+        env:
+          ZED_BUNDLE: "true"
+          CC: clang
+        run: ./scripts/run-zed-release-phases.sh
+
+      - name: Measure the Cargo target tree
+        id: measure
+        run: |
+          set -euo pipefail
+          bytes="$(du -sb upstream/target | cut -f1)"
+          echo "target_bytes=${bytes}" >> "$GITHUB_OUTPUT"
+          echo "Cargo target tree: $(numfmt --to=iec --suffix=B "$bytes")"
+
+      - name: Save the Cargo state to actions/cache
+        id: save
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ env.CACHE_KEY }}
+          path: |
+            upstream/target
+            ~/.cargo/registry
+            ~/.cargo/git
+
+      - name: Record the Actions cache outcome
+        env:
+          SAVE_OUTCOME: ${{ steps.save.outcome }}
+          TARGET_BYTES: ${{ steps.measure.outputs.target_bytes }}
+        run: |
+          {
+            echo "## Actions cache seed"
+            echo
+            echo "- Cargo target tree: \`$(numfmt --to=iec --suffix=B "$TARGET_BYTES")\`"
+            echo "- GitHub per-repository cache limit: \`10 GB\`"
+            echo "- \`actions/cache/save\` outcome: \`${SAVE_OUTCOME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  rolling:
+    name: Actions cache Zed Cargo commit
+    needs: seed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout the adjacent Zed head
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
+          git -C upstream fetch --no-tags --depth 2 origin "${{ inputs.head_sha }}"
+          git -C upstream checkout --detach "${{ inputs.head_sha }}"
+          test "$(git -C upstream rev-parse HEAD^)" = "${{ inputs.base_sha }}"
+          git -C upstream clean -fdx
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libglib2.0-dev libssl-dev pkg-config cmake \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
+            musl-tools clang
+
+      - name: Install Zed's pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's/^channel = "\(.*\)"$/\1/p' upstream/rust-toolchain.toml)"
+          test -n "$pinned"
+          grep -Fxq "ZED_RUST_VERSION=${pinned}" benchmark-source.env
+          rustup toolchain install "$pinned" --profile minimal
+          rustup default "$pinned"
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Verify Zed release recipe
+        run: ./scripts/verify-zed-release-recipe.py upstream
+
+      - name: Mirror Zed's bundle release version
+        run: |
+          set -euo pipefail
+          version="$(cd upstream && script/get-crate-version zed)"
+          test -n "$version"
+          echo "RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
+
+      - name: Free runner disk space
+        run: ./scripts/free-runner-disk.sh
+
+      - name: Restore the Cargo state from actions/cache
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ env.CACHE_KEY }}
+          path: |
+            upstream/target
+            ~/.cargo/registry
+            ~/.cargo/git
+
+      - name: Start the build timer
+        id: build_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Zed's release commands
+        env:
+          ZED_BUNDLE: "true"
+          CC: clang
+        run: ./scripts/run-zed-release-phases.sh
+
+      - name: Capture the build timing
+        id: build_timing
+        env:
+          BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
+        run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the Zed build
+        run: |
+          set -euo pipefail
+          test -x upstream/target/x86_64-unknown-linux-gnu/release/zed
+          test -x upstream/target/x86_64-unknown-linux-gnu/release/cli
+          test -x upstream/target/x86_64-unknown-linux-musl/release/remote_server
+          test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
+
+      - name: Publish the Actions control result
+        env:
+          BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          SEED_SAVED: ${{ needs.seed.outputs.saved }}
+          TARGET_BYTES: ${{ needs.seed.outputs.target_bytes }}
+        run: |
+          {
+            echo "## Zed Cargo actions/cache control"
+            echo
+            echo "- Source: \`${{ inputs.base_sha }}\` → \`${{ inputs.head_sha }}\`"
+            echo "- Seed \`actions/cache/save\`: \`${SEED_SAVED}\` (tree $(numfmt --to=iec --suffix=B "$TARGET_BYTES"))"
+            echo "- Rolling \`actions/cache\` hit: \`${CACHE_HIT:-false}\`"
+            echo "- Rolling build: \`${BUILD_SECONDS}s\`"
+          } >> "$GITHUB_STEP_SUMMARY"

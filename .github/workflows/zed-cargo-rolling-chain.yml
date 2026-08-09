@@ -101,7 +101,8 @@ jobs:
             libasound2-dev libfontconfig1-dev libfreetype6-dev \
             libglib2.0-dev libssl-dev pkg-config cmake \
             libx11-dev libx11-xcb-dev libxcb1-dev \
-            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
+            musl-tools clang
 
       - name: Install Zed's pinned Rust toolchain
         run: |
@@ -111,6 +112,17 @@ jobs:
           grep -Fxq "ZED_RUST_VERSION=${pinned}" benchmark-source.env
           rustup toolchain install "$pinned" --profile minimal
           rustup default "$pinned"
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Verify Zed release recipe
+        run: ./scripts/verify-zed-release-recipe.py upstream
+
+      - name: Mirror Zed's bundle release version
+        run: |
+          set -euo pipefail
+          version="$(cd upstream && script/get-crate-version zed)"
+          test -n "$version"
+          echo "RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
 
       - name: Free runner disk space
         run: ./scripts/free-runner-disk.sh
@@ -125,7 +137,7 @@ jobs:
         id: build_timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
       
-      - name: Run the released Cargo product
+      - name: Build zed and cli through the Cargo product
         id: cache
         uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
         with:
@@ -135,10 +147,35 @@ jobs:
           trust-policy: publish
           working-directory: upstream
           fail-on-cache-error: true
-          metadata-hints: phase=rolling
+          metadata-hints: phase=rolling-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          ZED_BUNDLE: "true"
+          CC: clang
+          RUSTFLAGS: -C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib
+
+      - name: Select Zed's remote_server release command
+        run: ./scripts/select-zed-cargo-phase.py remote-server
+
+      - name: Build remote_server through the Cargo product
+        id: cache_remote
+        uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: publish
+          working-directory: upstream
+          fail-on-cache-error: true
+          metadata-hints: phase=rolling-remote-server
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          ZED_BUNDLE: "true"
+          CC: clang
+          RUSTFLAGS: -C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static
+          CC_x86_64_unknown_linux_musl: musl-gcc
 
       - name: Capture the build timing
         id: build_timing
@@ -149,7 +186,9 @@ jobs:
       - name: Verify the Zed build
         run: |
           set -euo pipefail
-          test -x upstream/target/release/zed
+          test -x upstream/target/x86_64-unknown-linux-gnu/release/zed
+          test -x upstream/target/x86_64-unknown-linux-gnu/release/cli
+          test -x upstream/target/x86_64-unknown-linux-musl/release/remote_server
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
       - name: Write the benchmark phase evidence
