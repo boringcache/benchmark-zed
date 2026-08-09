@@ -183,6 +183,13 @@ jobs:
           BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
         run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
       
+      - name: Summarize the Cargo rebuild set
+        if: always()
+        run: |
+          ./scripts/summarize-cargo-evidence.py \
+            primary "${{ steps.cache.outputs.evidence-path }}" \
+            remote-server "${{ steps.cache_remote.outputs.evidence-path }}"
+
       - name: Verify the Zed build
         run: |
           set -euo pipefail
