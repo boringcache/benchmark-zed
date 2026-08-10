@@ -51,8 +51,6 @@ def expected_command(phase: str) -> list[str]:
     command = [
         "cargo",
         "build",
-        "--manifest-path",
-        "../../../upstream/Cargo.toml",
         "--release",
         "--target",
         target,
@@ -187,9 +185,13 @@ def verify_workflows() -> None:
     for lane in LANES:
         for phase in PHASES:
             require(
-                f"working-directory: plans/{lane}/{phase}" in matrix,
+                f"activate-cargo-plan.sh {lane} {phase}" in matrix,
                 f"The matrix does not select plans/{lane}/{phase}",
             )
+    require(
+        matrix.count("working-directory: upstream") == 8,
+        "Every matrix phase must run Cargo from the upstream Git checkout",
+    )
     require(
         matrix.count("mode: cargo") == 8,
         "The four lanes must each run both Cargo release phases",

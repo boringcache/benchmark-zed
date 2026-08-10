@@ -5,6 +5,9 @@ This repository contains the BoringCache benchmark for Zed.
 The release matrix compares one cold seed with target-only, sccache-only, and
 combined Cargo plans on fresh runners. Each layer choice and both of Zed's Linux
 release commands live in committed `.boringcache.toml` files under `plans/`.
+The Action activates the selected plan inside the clean Zed checkout so the CLI
+measures source freshness against Zed itself, while the workflow remains only a
+lane/phase selector.
 The GitHub workflow selects those plans and leaves cache identity, target
 selection, and compiler-cache selection to the BoringCache CLI.
 

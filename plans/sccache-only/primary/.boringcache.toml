@@ -9,7 +9,7 @@ tag = "zed-cargo-layers-1181-d4010e9-git"
 [entries.zed-target]
 kind = "cargo-target"
 tag = "zed-cargo-layers-1181-d4010e9-target"
-path = "../../../upstream/target"
+path = "target"
 
 [profiles.cargo-product]
 entries = ["cargo-registry", "cargo-git"]
@@ -27,8 +27,6 @@ metadata-hints = ["benchmark=zed-cargo-layers", "lane=sccache-only", "phase=prim
 command = [
   "cargo",
   "build",
-  "--manifest-path",
-  "../../../upstream/Cargo.toml",
   "--release",
   "--target",
   "x86_64-unknown-linux-gnu",

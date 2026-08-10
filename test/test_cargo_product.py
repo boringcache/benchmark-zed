@@ -71,8 +71,7 @@ class CargoLayerPlanTest(unittest.TestCase):
                 self.assertEqual(cargo["compiler-cache"], compiler)
                 self.assertEqual("zed-target" in profile, includes_target)
                 self.assertEqual(cargo["profiles"], ["cargo-product"])
-                self.assertIn("--manifest-path", cargo["command"])
-                self.assertIn("../../../upstream/Cargo.toml", cargo["command"])
+                self.assertNotIn("--manifest-path", cargo["command"])
                 target_tags.add(plan["entries"]["zed-target"]["tag"])
 
                 if compiler == "sccache":
@@ -100,9 +99,10 @@ class CargoLayerPlanTest(unittest.TestCase):
         for lane in LANES:
             for phase in ("primary", "remote-server"):
                 self.assertIn(
-                    f"working-directory: plans/{lane}/{phase}",
+                    f"activate-cargo-plan.sh {lane} {phase}",
                     matrix,
                 )
+        self.assertEqual(matrix.count("working-directory: upstream"), 8)
 
     def test_rolling_plan_owns_its_stable_compiler_identity(self):
         plan = tomllib.loads((ROOT / ".boringcache.toml").read_text())
