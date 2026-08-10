@@ -12,10 +12,6 @@ on:
         required: false
         type: string
         default: ""
-      cache_scope:
-        description: Existing rolling scope whose target was published from base_sha.
-        required: true
-        type: string
       base_sha:
         description: Source commit currently represented by the published target.
         required: true
@@ -45,23 +41,12 @@ jobs:
     outputs:
       base_sha: ${{ steps.source.outputs.ZED_BASE_SHA }}
       head_sha: ${{ steps.source.outputs.ZED_HEAD_SHA }}
-      cache_scope: ${{ steps.scope.outputs.cache_scope }}
       source_repository: ${{ steps.source.outputs.ZED_SOURCE_REPOSITORY }}
     steps:
       - uses: actions/checkout@v6
       - name: Read pinned source
         id: source
         run: sed '/^$/d' benchmark-source.env >> "$GITHUB_OUTPUT"
-
-      - name: Name the rolling cohort
-        id: scope
-        run: |
-          set -euo pipefail
-          ref_slug="$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')"
-          ref_slug="${ref_slug#-}"
-          ref_slug="${ref_slug%-}"
-          ref_slug="${ref_slug:-main}"
-          echo "cache_scope=zed-cargo-rolling-${ref_slug}" >> "$GITHUB_OUTPUT"
 
   advance:
     name: BoringCache Zed Cargo commit
@@ -72,7 +57,6 @@ jobs:
     env:
       RESOLVED_BASE_SHA: ${{ github.event_name == 'push' && needs.source.outputs.base_sha || inputs.base_sha }}
       RESOLVED_HEAD_SHA: ${{ github.event_name == 'push' && needs.source.outputs.head_sha || inputs.head_sha }}
-      RESOLVED_CACHE_SCOPE: ${{ github.event_name == 'push' && needs.source.outputs.cache_scope || inputs.cache_scope }}
     steps:
       - name: Start the workflow timer
         id: workflow_timer
@@ -109,9 +93,6 @@ jobs:
 
       - name: Free runner disk space
         run: ./scripts/free-runner-disk.sh
-
-      - name: Scope the persistent Cargo product chain
-        run: ./scripts/scope-boringcache-run.sh "$RESOLVED_CACHE_SCOPE"
 
       - name: Require an empty destination
         run: test ! -e upstream/target

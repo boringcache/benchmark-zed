@@ -1,0 +1,39 @@
+workspace = "boringcache/benchmark-zed"
+
+[entries.cargo-registry]
+tag = "zed-cargo-layers-1181-d4010e9-registry"
+
+[entries.cargo-git]
+tag = "zed-cargo-layers-1181-d4010e9-git"
+
+[entries.zed-target]
+kind = "cargo-target"
+tag = "zed-cargo-layers-1181-d4010e9-target"
+path = "../../../upstream/target"
+
+[profiles.cargo-product]
+entries = ["cargo-registry", "cargo-git"]
+
+[adapters.sccache]
+tag = "zed-cargo-layers-1181-d4010e9-sccache"
+no-git = true
+metadata-hints = ["benchmark=zed-cargo-layers", "layer=compiler"]
+
+[adapters.cargo]
+profiles = ["cargo-product"]
+compiler-cache = "sccache"
+no-git = true
+metadata-hints = ["benchmark=zed-cargo-layers", "lane=sccache-only", "phase=primary"]
+command = [
+  "cargo",
+  "build",
+  "--manifest-path",
+  "../../../upstream/Cargo.toml",
+  "--release",
+  "--target",
+  "x86_64-unknown-linux-gnu",
+  "--package",
+  "zed",
+  "--package",
+  "cli",
+]
