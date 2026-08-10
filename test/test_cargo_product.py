@@ -91,6 +91,7 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertNotIn("scope-boringcache-run", workflow_text)
         self.assertNotIn("mode: sccache", workflow_text)
         self.assertNotIn("sed -i", workflow_text)
+        self.assertNotIn("fail-on-cache-miss", matrix)
         self.assertNotIn("cache_scope:", rolling)
         self.assertEqual(matrix.count("mode: cargo"), 8)
         self.assertIn("inputs.cli_version", matrix)
@@ -171,6 +172,37 @@ class CargoLayerPlanTest(unittest.TestCase):
 
         self.assertIn("96.0% hit rate", result.stdout)
         self.assertNotIn("9600", result.stdout)
+
+    def test_report_handles_a_disabled_compiler_cache(self):
+        evidence = {
+            "phases": {
+                "restore": {
+                    "mode_evidence": {
+                        "elapsed_seconds": 12.4,
+                        "target_cache_hit": True,
+                        "native_tool": None,
+                        "cargo_cache": {"compiler_cache": "none"},
+                    }
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            path.write_text(json.dumps(evidence))
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/summarize-cargo-evidence.py"),
+                    "target-only",
+                    str(path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        self.assertIn("target snapshot restored: `True`", result.stdout)
+        self.assertIn("compiler cache: disabled", result.stdout)
 
 
 if __name__ == "__main__":

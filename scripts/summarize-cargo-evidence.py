@@ -19,7 +19,8 @@ def summarize(label: str, evidence_path: Path) -> str:
     evidence = json.loads(evidence_path.read_text())
     phase = evidence.get("phases", {}).get("restore", {})
     mode = phase.get("mode_evidence", {})
-    native = mode.get("native_tool", {})
+    native = mode.get("native_tool") or {}
+    compiler_cache = mode.get("cargo_cache", {}).get("compiler_cache")
 
     requests = native.get("compile_requests")
     executed = native.get("compile_requests_executed")
@@ -35,6 +36,8 @@ def summarize(label: str, evidence_path: Path) -> str:
         lines.append(f"  - elapsed: {elapsed:.0f}s")
     if target_hit is not None:
         lines.append(f"  - target snapshot restored: `{target_hit}`")
+    if compiler_cache == "none":
+        lines.append("  - compiler cache: disabled")
     if requests is not None:
         lines.append(
             f"  - Cargo units compiled: {executed if executed is not None else requests}"

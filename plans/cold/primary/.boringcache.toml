@@ -1,21 +1,21 @@
 workspace = "boringcache/benchmark-zed"
 
 [entries.cargo-registry]
-tag = "zed-cargo-layers-1181-d4010e9-r2-registry"
+tag = "zed-cargo-layers-1181-d4010e9-r3-registry"
 
 [entries.cargo-git]
-tag = "zed-cargo-layers-1181-d4010e9-r2-git"
+tag = "zed-cargo-layers-1181-d4010e9-r3-git"
 
 [entries.zed-target]
 kind = "cargo-target"
-tag = "zed-cargo-layers-1181-d4010e9-r2-target"
+tag = "zed-cargo-layers-1181-d4010e9-r3-target"
 path = "target"
 
 [profiles.cargo-product]
 entries = ["cargo-registry", "cargo-git", "zed-target"]
 
 [adapters.sccache]
-tag = "zed-cargo-layers-1181-d4010e9-r2-sccache"
+tag = "zed-cargo-layers-1181-d4010e9-r3-sccache"
 no-git = true
 metadata-hints = ["benchmark=zed-cargo-layers", "layer=compiler"]
 
