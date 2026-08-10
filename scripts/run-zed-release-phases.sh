@@ -27,6 +27,8 @@ run_phase() {
   local log units status
 
   log="$(mktemp)"
+  local phase_started
+  phase_started="$(date +%s)"
   echo "+ ${command}"
 
   set +e
@@ -44,6 +46,7 @@ run_phase() {
 
   units="$(grep -cE '^[[:space:]]*Compiling ' "${log}" || true)"
   echo "zed-benchmark: ${label}_compiled_units=${units}"
+  echo "zed-benchmark: ${label}_seconds=$(( $(date +%s) - phase_started ))"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "- \`${label}\`: ${units} Cargo units compiled" >> "${GITHUB_STEP_SUMMARY}"
   fi

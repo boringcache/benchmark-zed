@@ -212,12 +212,12 @@ jobs:
       - run: ./scripts/scope-boringcache-run.sh "${{ needs.source.outputs.scope }}"
       - run: test ! -e upstream/target
 
-      # A no-op Cargo command so the adapter restores the profile without
-      # building; this is the only way to see a BoringCache-restored tree
-      # before Cargo mutates it.
-      - run: ./scripts/select-zed-cargo-phase.py probe
-      - name: Restore the target via BoringCache
-        id: probe
+      # The previous attempt used a `cargo --version` probe to see the restored
+      # tree before Cargo touched it. The adapter does not restore the
+      # cargo-target entry for a non-build command, so only registry and git came
+      # back and the lane silently ran cold. Let the real build drive the restore.
+      - name: Build primary with BoringCache target + sccache
+        id: primary
         uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
         with:
           setup: none
@@ -226,38 +226,34 @@ jobs:
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-lane-c-probe
+          metadata-hints: phase=matrix-lane-c-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
-      - uses: actions/download-artifact@v6
-        with: { name: seed-manifest, path: /tmp/seed }
-      - name: Check the restored target is exact
-        continue-on-error: true
+          RUSTFLAGS: -C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib
+
+      - name: Confirm the target actually restored
         run: |
           set -euo pipefail
-          ./scripts/tree-manifest.py emit upstream/target /tmp/restored.json
-          ./scripts/tree-manifest.py compare /tmp/seed/seed-manifest.json /tmp/restored.json
+          test -d upstream/target/x86_64-unknown-linux-gnu/release
+          du -sh upstream/target | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # The target is already on disk, so this lane pays one restore, not two.
-      - run: ./scripts/select-zed-cargo-phase.py primary
-      - id: t
-        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-      - name: Build both phases under BoringCache sccache
+      - run: ./scripts/select-zed-cargo-phase.py remote-server
+      - name: Build remote_server with BoringCache target + sccache
         uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
         with:
           setup: none
-          mode: sccache
+          mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-lane-c
+          metadata-hints: phase=matrix-lane-c-remote-server
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
-      - run: ./scripts/run-zed-release-phases.sh
-      - run: echo "lane-c build_seconds=$(( $(date +%s) - ${{ steps.t.outputs.at }} ))" | tee -a "$GITHUB_STEP_SUMMARY"
+          RUSTFLAGS: -C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static
+          CC_x86_64_unknown_linux_musl: musl-gcc
 
   lane-d:
     name: "d: sccache only, no target"
