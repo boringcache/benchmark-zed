@@ -95,7 +95,7 @@ jobs:
       
       - name: Run the released Cargo product
         id: cache
-        uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
         with:
           cli-version: ${{ env.BORINGCACHE_CLI_VERSION }}
           setup: none
@@ -213,7 +213,7 @@ jobs:
       
       - name: Run the released Cargo product
         id: cache
-        uses: boringcache/one@78e1fd3257bbdf27722c46b500a39b6626fc8d27 # v1 / 1.18.0
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
         with:
           cli-version: ${{ env.BORINGCACHE_CLI_VERSION }}
           setup: none
