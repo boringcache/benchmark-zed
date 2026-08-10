@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -134,6 +135,42 @@ class CargoLayerPlanTest(unittest.TestCase):
             cwd=ROOT,
             check=True,
         )
+
+    def test_native_hit_rate_is_already_a_percentage(self):
+        evidence = {
+            "phases": {
+                "restore": {
+                    "mode_evidence": {
+                        "elapsed_seconds": 12.4,
+                        "target_cache_hit": True,
+                        "native_tool": {
+                            "compile_requests": 101,
+                            "compile_requests_executed": 100,
+                            "cache_hits": 96,
+                            "cache_misses": 4,
+                            "hit_rate": 96.0,
+                        },
+                    }
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            path.write_text(json.dumps(evidence))
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/summarize-cargo-evidence.py"),
+                    "combined",
+                    str(path),
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        self.assertIn("96.0% hit rate", result.stdout)
+        self.assertNotIn("9600", result.stdout)
 
 
 if __name__ == "__main__":

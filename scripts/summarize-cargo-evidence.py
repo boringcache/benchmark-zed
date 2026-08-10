@@ -43,7 +43,7 @@ def summarize(label: str, evidence_path: Path) -> str:
     if hits is not None:
         lines.append(
             f"  - sccache: {hits} hits / {misses} misses"
-            f" ({(rate or 0) * 100:.1f}% hit rate)"
+            f" ({(rate or 0):.1f}% hit rate)"
         )
     if write_errors:
         lines.append(f"  - sccache write errors: {write_errors}")
