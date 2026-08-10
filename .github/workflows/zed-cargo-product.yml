@@ -165,7 +165,6 @@ jobs:
           mode: cargo
           trust-policy: restore
           working-directory: upstream
-          fail-on-cache-miss: true
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-target-only-primary
@@ -317,7 +316,6 @@ jobs:
           mode: cargo
           trust-policy: restore
           working-directory: upstream
-          fail-on-cache-miss: true
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-combined-primary
