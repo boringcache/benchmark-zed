@@ -104,13 +104,8 @@ jobs:
             libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
 
       - name: Install Zed's pinned Rust toolchain
-        run: |
-          set -euo pipefail
-          pinned="$(sed -n 's/^channel = "\(.*\)"$/\1/p' upstream/rust-toolchain.toml)"
-          test -n "$pinned"
-          grep -Fxq "ZED_RUST_VERSION=${pinned}" benchmark-source.env
-          rustup toolchain install "$pinned" --profile minimal
-          rustup default "$pinned"
+        working-directory: upstream
+        run: rustup show active-toolchain
 
       - name: Free runner disk space
         run: ./scripts/free-runner-disk.sh

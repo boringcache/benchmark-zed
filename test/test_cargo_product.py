@@ -20,7 +20,6 @@ class SourceSyncTest(unittest.TestCase):
                 "ZED_SOURCE_REPOSITORY=zed-industries/zed\n"
                 f"ZED_BASE_SHA={'0' * 40}\n"
                 f"ZED_HEAD_SHA={current}\n"
-                "ZED_RUST_VERSION=1.95.0\n"
             )
             bin_dir = root / "bin"
             bin_dir.mkdir()
@@ -46,10 +45,20 @@ class SourceSyncTest(unittest.TestCase):
 
         self.assertEqual(settings["ZED_BASE_SHA"], current)
         self.assertEqual(settings["ZED_HEAD_SHA"], following)
-        self.assertEqual(settings["ZED_RUST_VERSION"], "1.95.0")
 
 
 class CargoProductWorkflowTest(unittest.TestCase):
+    def test_workflows_use_zeds_checked_in_rust_toolchain(self):
+        workflow_text = "\n".join(
+            (WORKFLOWS / name).read_text()
+            for name in ["zed-cargo-product.yml", "zed-cargo-rolling-chain.yml"]
+        )
+        source = (ROOT / "benchmark-source.env").read_text()
+
+        self.assertEqual(workflow_text.count("rustup show active-toolchain"), 3)
+        self.assertNotIn("rustup toolchain install", workflow_text)
+        self.assertNotIn("ZED_RUST_VERSION", source + workflow_text)
+
     def test_cargo_is_the_only_live_boringcache_rust_lifecycle(self):
         workflow_text = "\n".join(
             path.read_text() for path in sorted(WORKFLOWS.glob("*.yml"))
