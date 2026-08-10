@@ -78,6 +78,9 @@ jobs:
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      - name: Select the cold primary CLI plan
+        run: ./scripts/activate-cargo-plan.sh cold primary
+
       - name: Build the primary seed through the combined Cargo plan
         id: primary
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
@@ -86,7 +89,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: publish
-          working-directory: plans/cold/primary
+          working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-cold-primary
@@ -94,6 +97,9 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+
+      - name: Select the cold remote-server CLI plan
+        run: ./scripts/activate-cargo-plan.sh cold remote-server
 
       - name: Build the remote server seed through the combined Cargo plan
         id: remote
@@ -103,7 +109,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: publish
-          working-directory: plans/cold/remote-server
+          working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-cold-remote-server
@@ -147,6 +153,9 @@ jobs:
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      - name: Select the target-only primary CLI plan
+        run: ./scripts/activate-cargo-plan.sh target-only primary
+
       - name: Build primary with the target-only Cargo plan
         id: primary
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
@@ -155,7 +164,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: plans/target-only/primary
+          working-directory: upstream
           fail-on-cache-miss: true
           fail-on-cache-error: true
           diagnostics: summary
@@ -165,6 +174,9 @@ jobs:
           BORINGCACHE_SAVE_TOKEN: ""
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
 
+      - name: Select the target-only remote-server CLI plan
+        run: ./scripts/activate-cargo-plan.sh target-only remote-server
+
       - name: Build remote server with the target-only Cargo plan
         id: remote
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
@@ -173,7 +185,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: plans/target-only/remote-server
+          working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-target-only-remote-server
@@ -218,6 +230,9 @@ jobs:
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      - name: Select the sccache-only primary CLI plan
+        run: ./scripts/activate-cargo-plan.sh sccache-only primary
+
       - name: Build primary with the sccache-only Cargo plan
         id: primary
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
@@ -226,7 +241,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: plans/sccache-only/primary
+          working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-sccache-only-primary
@@ -234,6 +249,9 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+
+      - name: Select the sccache-only remote-server CLI plan
+        run: ./scripts/activate-cargo-plan.sh sccache-only remote-server
 
       - name: Build remote server with the sccache-only Cargo plan
         id: remote
@@ -243,7 +261,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: plans/sccache-only/remote-server
+          working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-sccache-only-remote-server
@@ -287,6 +305,9 @@ jobs:
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
+      - name: Select the combined primary CLI plan
+        run: ./scripts/activate-cargo-plan.sh combined primary
+
       - name: Build primary with the combined Cargo plan
         id: primary
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
@@ -295,7 +316,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: plans/combined/primary
+          working-directory: upstream
           fail-on-cache-miss: true
           fail-on-cache-error: true
           diagnostics: summary
@@ -305,6 +326,9 @@ jobs:
           BORINGCACHE_SAVE_TOKEN: ""
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
 
+      - name: Select the combined remote-server CLI plan
+        run: ./scripts/activate-cargo-plan.sh combined remote-server
+
       - name: Build remote server with the combined Cargo plan
         id: remote
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
@@ -313,7 +337,7 @@ jobs:
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: plans/combined/remote-server
+          working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-combined-remote-server
