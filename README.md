@@ -2,4 +2,12 @@
 
 This repository contains the BoringCache benchmark for Zed.
 
-Benchmark workflows are in [`.github/workflows/`](.github/workflows/), with configuration in [`.boringcache.toml`](.boringcache.toml).
+The release matrix compares one cold seed with target-only, sccache-only, and
+combined Cargo plans on fresh runners. Each layer choice and both of Zed's Linux
+release commands live in committed `.boringcache.toml` files under `plans/`.
+The GitHub workflow selects those plans and leaves cache identity, target
+selection, and compiler-cache selection to the BoringCache CLI.
+
+The root [`.boringcache.toml`](.boringcache.toml) owns the persistent rolling
+chain. [`.github/workflows/zed-cargo-product.yml`](.github/workflows/zed-cargo-product.yml)
+owns the independent release matrix.

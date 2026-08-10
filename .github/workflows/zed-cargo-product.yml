@@ -1,11 +1,21 @@
-name: "Zed Cargo product run"
-run-name: ${{ format('Zed Cargo fresh | CLI {0}', inputs.cli_version || 'Action default') }}
+name: "Zed Cargo layer matrix"
+run-name: ${{ format('Zed Cargo layers | CLI {0}', inputs.cli_version || 'Action default') }}
 
 on:
   workflow_dispatch:
     inputs:
       cli_version:
-        description: "Exact immutable BoringCache CLI release tag."
+        description: Optional exact immutable BoringCache CLI release tag.
+        required: false
+        type: string
+        default: ""
+      base_sha:
+        description: Seed commit. Defaults to benchmark-source.env.
+        required: false
+        type: string
+        default: ""
+      head_sha:
+        description: Adjacent commit built by every warm lane. Defaults to benchmark-source.env.
         required: false
         type: string
         default: ""
@@ -14,305 +24,352 @@ on:
         required: false
         type: string
         default: ""
-  schedule:
-    - cron: "0 4 * * 5"
-  pull_request:
-    paths:
-      - ".github/workflows/zed-cargo-product.yml"
-      - ".gitmodules"
-      - "scripts/**"
-      - "upstream"
 
 permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: benchmark-zed-cargo-layer-matrix
+  cancel-in-progress: false
+
 env:
-  BORINGCACHE_CLI_VERSION: ${{ inputs.cli_version }}
-  CACHE_SCOPE: zed-cargo-r${{ github.run_id }}-a${{ github.run_attempt }}
+  CARGO_INCREMENTAL: "0"
+  ZED_BUNDLE: "true"
+  CC: clang
 
 jobs:
-  publish-base:
-    name: BoringCache Zed Cargo cold
-    if: inputs.runner_label == '' || github.ref_name == 'main'
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 240
+  source:
+    name: Resolve adjacent Zed source
+    runs-on: ubuntu-24.04
     outputs:
       base_sha: ${{ steps.source.outputs.base_sha }}
       head_sha: ${{ steps.source.outputs.head_sha }}
     steps:
-      - name: Start the workflow timer
-        id: workflow_timer
-        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
-      
-      - name: Checkout benchmark repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-      - name: Checkout the pinned Zed commit and its parent
+      - name: Select the reviewed source pair
         id: source
+        env:
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
         run: |
           set -euo pipefail
-          git submodule sync --recursive
-          git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
-          head_sha="$(git -C upstream rev-parse HEAD)"
-          if ! base_sha="$(git -C upstream rev-parse HEAD^ 2>/dev/null)"; then
-            git -C upstream fetch --deepen=1 origin "$head_sha"
-            base_sha="$(git -C upstream rev-parse HEAD^)"
-          fi
-          git -C upstream checkout --detach "$base_sha"
-          echo "base_sha=${base_sha}" >> "$GITHUB_OUTPUT"
-          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          source benchmark-source.env
+          echo "base_sha=${INPUT_BASE_SHA:-$ZED_BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${INPUT_HEAD_SHA:-$ZED_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare the base source tree
-        run: ./scripts/prepare-source.sh base
+  cold:
+    name: "Cold: target + sccache seed"
+    needs: source
+    if: inputs.runner_label == '' || github.ref_name == 'main'
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev \
-            libglib2.0-dev libssl-dev pkg-config cmake \
-            libx11-dev libx11-xcb-dev libxcb1-dev \
-            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
+      - name: Prepare the seed source and release toolchain
+        run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.base_sha }}"
 
-      - name: Install Zed's pinned Rust toolchain
-        working-directory: upstream
-        run: rustup show active-toolchain
-
-      - name: Free runner disk space
-        run: ./scripts/free-runner-disk.sh
-
-      - name: Scope the Cargo product plan
-        run: ./scripts/scope-boringcache-run.sh "$CACHE_SCOPE"
-
-      - name: Require a cold target
+      - name: Require an empty target
         run: test ! -e upstream/target
 
-      - name: Start the build timer
-        id: build_timer
+      - name: Start lane timing
+        id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
-      
-      - name: Run the released Cargo product
-        id: cache
+
+      - name: Build the primary seed through the combined Cargo plan
+        id: primary
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
         with:
-          cli-version: ${{ env.BORINGCACHE_CLI_VERSION }}
+          cli-version: ${{ inputs.cli_version }}
           setup: none
           mode: cargo
           trust-policy: publish
-          working-directory: upstream
+          working-directory: plans/cold/primary
           fail-on-cache-error: true
-          metadata-hints: phase=base
+          diagnostics: summary
+          metadata-hints: phase=matrix-cold-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
 
-      - name: Capture the build timing
-        id: build_timing
-        env:
-          BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
-        run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
-      
-      - name: Verify the Zed build
-        run: |
-          set -euo pipefail
-          test -x upstream/target/release/zed
-          test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
-
-      - name: Write the benchmark phase evidence
-        env:
-          WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
-          BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-          CACHE_TAG: ${{ steps.cache.outputs.cache-tag }}
-          CACHE_WORKSPACE: ${{ steps.cache.outputs.workspace }}
-          EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
-          SOURCE_SHA: ${{ steps.source.outputs.base_sha }}
-        run: |
-          set -euo pipefail
-          source_repository="$(sed -n 's/^ZED_SOURCE_REPOSITORY=//p' benchmark-source.env)"
-          python3 ./scripts/benchmark-report.py phase \
-            --benchmark zed-cargo \
-            --strategy boringcache \
-            --lane fresh \
-            --phase cold \
-            --mode cargo \
-            --build-seconds "$BUILD_SECONDS" \
-            --workflow-seconds "$(( $(date +%s) - WORKFLOW_STARTED_AT ))" \
-            --cache-hit "$CACHE_HIT" \
-            --cache-tag "$CACHE_TAG" \
-            --workspace "$CACHE_WORKSPACE" \
-            --source-repository "$source_repository" \
-            --source-sha "$SOURCE_SHA" \
-            --evidence "$EVIDENCE_PATH"
-      
-      - name: Retain the benchmark phase evidence
-        uses: actions/upload-artifact@v6
-        with:
-          name: phase-zed-cargo-boringcache-fresh-cold
-          path: benchmark-results/
-          if-no-files-found: error
-      
-      - name: Retain base product evidence
-        uses: actions/upload-artifact@v6
-        with:
-          name: zed-cargo-product-base
-          path: ${{ steps.cache.outputs.evidence-path }}
-          if-no-files-found: error
-
-  consume-head:
-    name: BoringCache Zed Cargo warm
-    needs: publish-base
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
-    timeout-minutes: 240
-    steps:
-      - name: Start the workflow timer
-        id: workflow_timer
-        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
-      
-      - name: Checkout benchmark repository
-        uses: actions/checkout@v6
-
-      - name: Checkout the pinned Zed head
-        run: |
-          set -euo pipefail
-          git submodule sync --recursive
-          git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
-          test "$(git -C upstream rev-parse HEAD)" = "${{ needs.publish-base.outputs.head_sha }}"
-
-      - name: Prepare the head source tree
-        run: ./scripts/prepare-source.sh warm1
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev \
-            libglib2.0-dev libssl-dev pkg-config cmake \
-            libx11-dev libx11-xcb-dev libxcb1-dev \
-            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
-
-      - name: Install Zed's pinned Rust toolchain
-        working-directory: upstream
-        run: rustup show active-toolchain
-
-      - name: Free runner disk space
-        run: ./scripts/free-runner-disk.sh
-
-      - name: Scope the same Cargo product plan
-        run: ./scripts/scope-boringcache-run.sh "$CACHE_SCOPE"
-
-      - name: Require an empty destination
-        run: test ! -e upstream/target
-
-      - name: Start the build timer
-        id: build_timer
-        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
-      
-      - name: Run the released Cargo product
-        id: cache
+      - name: Build the remote server seed through the combined Cargo plan
+        id: remote
         uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
         with:
-          cli-version: ${{ env.BORINGCACHE_CLI_VERSION }}
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: publish
+          working-directory: plans/cold/remote-server
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-cold-remote-server
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static'
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      - name: Report cold-layer evidence
+        run: |
+          echo "lane_seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/summarize-cargo-evidence.py \
+            cold-primary "${{ steps.primary.outputs.evidence-path }}" \
+            cold-remote-server "${{ steps.remote.outputs.evidence-path }}"
+
+      - name: Retain cold product evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-cargo-layers-cold
+          path: |
+            ${{ steps.primary.outputs.evidence-path }}
+            ${{ steps.remote.outputs.evidence-path }}
+          if-no-files-found: error
+
+  target-only:
+    name: "Target only: compiler cache disabled"
+    needs: [source, cold]
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare the adjacent source and release toolchain
+        run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
+
+      - name: Require an empty target
+        run: test ! -e upstream/target
+
+      - name: Start lane timing
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build primary with the target-only Cargo plan
+        id: primary
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
+        with:
+          cli-version: ${{ inputs.cli_version }}
           setup: none
           mode: cargo
           trust-policy: restore
-          working-directory: upstream
+          working-directory: plans/target-only/primary
+          fail-on-cache-miss: true
           fail-on-cache-error: true
-          metadata-hints: phase=head
+          diagnostics: summary
+          metadata-hints: phase=matrix-target-only-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
 
-      - name: Capture the build timing
-        id: build_timing
+      - name: Build remote server with the target-only Cargo plan
+        id: remote
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: restore
+          working-directory: plans/target-only/remote-server
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-target-only-remote-server
         env:
-          BUILD_STARTED_AT: ${{ steps.build_timer.outputs.started_at }}
-        run: echo "build_seconds=$(( $(date +%s) - BUILD_STARTED_AT ))" >> "$GITHUB_OUTPUT"
-      
-      - name: Verify the Zed build
-        run: |
-          set -euo pipefail
-          test -x upstream/target/release/zed
-          test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static'
+          CC_x86_64_unknown_linux_musl: musl-gcc
 
-      - name: Write the benchmark phase evidence
-        env:
-          WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
-          BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-          CACHE_TAG: ${{ steps.cache.outputs.cache-tag }}
-          CACHE_WORKSPACE: ${{ steps.cache.outputs.workspace }}
-          EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
-          SOURCE_SHA: ${{ needs.publish-base.outputs.head_sha }}
+      - name: Report target-only evidence
         run: |
-          set -euo pipefail
-          source_repository="$(sed -n 's/^ZED_SOURCE_REPOSITORY=//p' benchmark-source.env)"
-          python3 ./scripts/benchmark-report.py phase \
-            --benchmark zed-cargo \
-            --strategy boringcache \
-            --lane fresh \
-            --phase warm \
-            --mode cargo \
-            --build-seconds "$BUILD_SECONDS" \
-            --workflow-seconds "$(( $(date +%s) - WORKFLOW_STARTED_AT ))" \
-            --cache-hit "$CACHE_HIT" \
-            --cache-tag "$CACHE_TAG" \
-            --workspace "$CACHE_WORKSPACE" \
-            --source-repository "$source_repository" \
-            --source-sha "$SOURCE_SHA" \
-            --evidence "$EVIDENCE_PATH"
-      
-      - name: Retain the benchmark phase evidence
+          test "${{ steps.primary.outputs.cache-hit }}" = "true"
+          echo "lane_seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/summarize-cargo-evidence.py \
+            target-only-primary "${{ steps.primary.outputs.evidence-path }}" \
+            target-only-remote-server "${{ steps.remote.outputs.evidence-path }}"
+
+      - name: Retain target-only product evidence
         uses: actions/upload-artifact@v6
         with:
-          name: phase-zed-cargo-boringcache-fresh-warm
-          path: benchmark-results/
+          name: zed-cargo-layers-target-only
+          path: |
+            ${{ steps.primary.outputs.evidence-path }}
+            ${{ steps.remote.outputs.evidence-path }}
           if-no-files-found: error
-      
-      - name: Publish product run summary
-        run: |
-          {
-            echo "## Zed Cargo product run"
-            echo
-            echo "- CLI: \`${BORINGCACHE_CLI_VERSION}\`"
-            echo "- Source: \`${{ needs.publish-base.outputs.base_sha }}\` → \`${{ needs.publish-base.outputs.head_sha }}\`"
-            echo "- Signed target available before the adjacent build: \`${{ steps.cache.outputs.cache-hit }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Retain head product evidence
+  sccache-only:
+    name: "sccache only: target excluded"
+    needs: [source, cold]
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare the adjacent source and release toolchain
+        run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
+
+      - name: Require an empty target
+        run: test ! -e upstream/target
+
+      - name: Start lane timing
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build primary with the sccache-only Cargo plan
+        id: primary
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: restore
+          working-directory: plans/sccache-only/primary
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-sccache-only-primary
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+
+      - name: Build remote server with the sccache-only Cargo plan
+        id: remote
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: restore
+          working-directory: plans/sccache-only/remote-server
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-sccache-only-remote-server
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static'
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      - name: Report sccache-only evidence
+        run: |
+          echo "lane_seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/summarize-cargo-evidence.py \
+            sccache-only-primary "${{ steps.primary.outputs.evidence-path }}" \
+            sccache-only-remote-server "${{ steps.remote.outputs.evidence-path }}"
+
+      - name: Retain sccache-only product evidence
         uses: actions/upload-artifact@v6
         with:
-          name: zed-cargo-product-head
-          path: ${{ steps.cache.outputs.evidence-path }}
+          name: zed-cargo-layers-sccache-only
+          path: |
+            ${{ steps.primary.outputs.evidence-path }}
+            ${{ steps.remote.outputs.evidence-path }}
+          if-no-files-found: error
+
+  combined:
+    name: "Combined: target + sccache"
+    needs: [source, cold]
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare the adjacent source and release toolchain
+        run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
+
+      - name: Require an empty target
+        run: test ! -e upstream/target
+
+      - name: Start lane timing
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build primary with the combined Cargo plan
+        id: primary
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: restore
+          working-directory: plans/combined/primary
+          fail-on-cache-miss: true
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-combined-primary
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+
+      - name: Build remote server with the combined Cargo plan
+        id: remote
+        uses: boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56 # v1 / 1.18.1
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          setup: none
+          mode: cargo
+          trust-policy: restore
+          working-directory: plans/combined/remote-server
+          fail-on-cache-error: true
+          diagnostics: summary
+          metadata-hints: phase=matrix-combined-remote-server
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ""
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static'
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      - name: Report combined evidence
+        run: |
+          test "${{ steps.primary.outputs.cache-hit }}" = "true"
+          echo "lane_seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/summarize-cargo-evidence.py \
+            combined-primary "${{ steps.primary.outputs.evidence-path }}" \
+            combined-remote-server "${{ steps.remote.outputs.evidence-path }}"
+
+      - name: Retain combined product evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-cargo-layers-combined
+          path: |
+            ${{ steps.primary.outputs.evidence-path }}
+            ${{ steps.remote.outputs.evidence-path }}
           if-no-files-found: error
 
   report:
-    name: Zed Cargo fresh report
-    needs: consume-head
+    name: Compare Cargo layers
+    needs: [cold, target-only, sccache-only, combined]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download the benchmark phase evidence
+      - name: Download every lane's product evidence
         uses: actions/download-artifact@v6
         with:
-          pattern: phase-zed-cargo-*
-          path: phase-evidence
+          pattern: zed-cargo-layers-*
+          path: layer-evidence
 
-      - name: Publish the Zed Cargo fresh benchmark report
+      - name: Publish the independent layer report
         run: |
-          python3 ./scripts/benchmark-report.py summarize \
-            --title "Zed Cargo fresh benchmark" \
-            --input-dir phase-evidence \
-            --output-dir benchmark-results
+          set -euo pipefail
+          mkdir -p benchmark-results
+          args=()
+          while IFS= read -r evidence; do
+            label="$(basename "$(dirname "$evidence")")/$(basename "$evidence")"
+            args+=("$label" "$evidence")
+          done < <(find layer-evidence -type f -name '*.json' -print | sort)
+          test "${#args[@]}" -gt 0
+          ./scripts/summarize-cargo-evidence.py "${args[@]}" |
+            tee benchmark-results/zed-cargo-layer-matrix.md
 
-      - name: Retain the Zed Cargo fresh result
+      - name: Retain the layer report
         uses: actions/upload-artifact@v6
         with:
-          name: benchmark-zed-cargo-boringcache-fresh
-          path: benchmark-results/zed-cargo-boringcache-fresh.json
+          name: benchmark-zed-cargo-layer-matrix
+          path: benchmark-results/zed-cargo-layer-matrix.md
           if-no-files-found: error

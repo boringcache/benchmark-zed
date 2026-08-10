@@ -1,12 +1,20 @@
 import os
 import subprocess
+import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+LANES = {
+    "cold": ("sccache", True),
+    "target-only": ("none", True),
+    "sccache-only": ("sccache", False),
+    "combined": ("sccache", True),
+}
 
 
 class SourceSyncTest(unittest.TestCase):
@@ -47,76 +55,85 @@ class SourceSyncTest(unittest.TestCase):
         self.assertEqual(settings["ZED_HEAD_SHA"], following)
 
 
-class CargoProductWorkflowTest(unittest.TestCase):
-    def test_workflows_use_zeds_checked_in_rust_toolchain(self):
-        workflow_text = "\n".join(
-            (WORKFLOWS / name).read_text()
-            for name in ["zed-cargo-product.yml", "zed-cargo-rolling-chain.yml"]
-        )
-        source = (ROOT / "benchmark-source.env").read_text()
+class CargoLayerPlanTest(unittest.TestCase):
+    def test_each_layer_choice_is_a_committed_cli_plan(self):
+        target_tags = set()
+        compiler_tags = set()
 
-        self.assertEqual(workflow_text.count("rustup show active-toolchain"), 3)
-        self.assertNotIn("rustup toolchain install", workflow_text)
-        self.assertNotIn("ZED_RUST_VERSION", source + workflow_text)
+        for lane, (compiler, includes_target) in LANES.items():
+            for phase in ("primary", "remote-server"):
+                path = ROOT / "plans" / lane / phase / ".boringcache.toml"
+                plan = tomllib.loads(path.read_text())
+                profile = plan["profiles"]["cargo-product"]["entries"]
+                cargo = plan["adapters"]["cargo"]
 
-    def test_cargo_is_the_only_live_boringcache_rust_lifecycle(self):
-        workflow_text = "\n".join(
-            path.read_text() for path in sorted(WORKFLOWS.glob("*.yml"))
-        )
-        config = (ROOT / ".boringcache.toml").read_text()
+                self.assertEqual(cargo["compiler-cache"], compiler)
+                self.assertEqual("zed-target" in profile, includes_target)
+                self.assertEqual(cargo["profiles"], ["cargo-product"])
+                self.assertIn("--manifest-path", cargo["command"])
+                self.assertIn("../../../upstream/Cargo.toml", cargo["command"])
+                target_tags.add(plan["entries"]["zed-target"]["tag"])
 
-        self.assertIn("[adapters.cargo]", config)
-        self.assertNotIn("[adapters.sccache]", config)
-        self.assertNotIn("mode: sccache", workflow_text)
-        self.assertNotIn("uses: boringcache/one@", workflow_text)
+                if compiler == "sccache":
+                    self.assertIn("sccache", plan["adapters"])
+                    compiler_tags.add(plan["adapters"]["sccache"]["tag"])
+                else:
+                    self.assertNotIn("sccache", plan["adapters"])
 
-    def test_weekly_fresh_workflow_owns_publish_and_consume(self):
-        workflow = (WORKFLOWS / "zed-cargo-product.yml").read_text()
+        self.assertEqual(len(target_tags), 1)
+        self.assertEqual(len(compiler_tags), 1)
 
-        self.assertNotIn("push:", workflow)
-        self.assertNotIn("pull_request:", workflow)
-        self.assertNotIn("workflow_dispatch:", workflow)
-        self.assertIn("workflow_call:", workflow)
-        self.assertIn("schedule:", workflow)
-        self.assertIn('cron: "0 4 * * 5"', workflow)
-        self.assertEqual(workflow.count("boringcache cargo \\"), 2)
-        self.assertIn("--write", workflow)
-        self.assertIn("--read-only", workflow)
-        self.assertIn("cargo-freshness-v2.json", workflow)
-        self.assertIn("--native-tool-evidence-json", workflow)
-
-    def test_source_updates_run_the_persistent_rolling_chain(self):
-        dispatcher = (WORKFLOWS / "zed-rust-cache-proof.yml").read_text()
+    def test_action_selects_plans_but_does_not_plan_layers(self):
+        matrix = (WORKFLOWS / "zed-cargo-product.yml").read_text()
         rolling = (WORKFLOWS / "zed-cargo-rolling-chain.yml").read_text()
-        sync = (WORKFLOWS / "sync.yml").read_text()
-        source = (ROOT / "benchmark-source.env").read_text()
+        workflow_text = matrix + rolling
 
-        self.assertIn('- "benchmark-source.env"', dispatcher)
-        self.assertIn("uses: ./.github/workflows/zed-cargo-rolling-chain.yml", dispatcher)
-        self.assertNotIn("zed-cargo-product.yml", dispatcher)
-        self.assertIn("ZED_ROLLING_CACHE_SCOPE=", source)
-        self.assertIn('cron: "*/30 * * * *"', sync)
-        self.assertIn("advance-source-pair.sh benchmark-source.env ZED", sync)
-        self.assertIn("Require the previous rolling benchmark to be green", sync)
-        self.assertIn("steps.previous.outputs.ready == 'true'", sync)
-        self.assertIn("git add benchmark-source.env upstream", sync)
-        self.assertIn("group: benchmark-zed-cargo-rolling-chain", rolling)
+        self.assertNotIn("scope-boringcache-run", workflow_text)
+        self.assertNotIn("mode: sccache", workflow_text)
+        self.assertNotIn("sed -i", workflow_text)
+        self.assertNotIn("cache_scope:", rolling)
+        self.assertEqual(matrix.count("mode: cargo"), 8)
+        self.assertIn("inputs.cli_version", matrix)
+        self.assertIn("Action default", matrix)
 
-        settings = dict(line.split("=", 1) for line in source.splitlines())
-        gitlink = subprocess.run(
-            ["git", "ls-files", "-s", "upstream"],
+        for lane in LANES:
+            for phase in ("primary", "remote-server"):
+                self.assertIn(
+                    f"working-directory: plans/{lane}/{phase}",
+                    matrix,
+                )
+
+    def test_rolling_plan_owns_its_stable_compiler_identity(self):
+        plan = tomllib.loads((ROOT / ".boringcache.toml").read_text())
+
+        self.assertEqual(plan["adapters"]["cargo"]["compiler-cache"], "sccache")
+        self.assertIn("sccache", plan["adapters"])
+        self.assertEqual(
+            plan["adapters"]["sccache"]["tag"],
+            "zed-cargo-rolling-main-sccache",
+        )
+
+    def test_source_pair_matches_the_pinned_submodule(self):
+        source = dict(
+            line.split("=", 1)
+            for line in (ROOT / "benchmark-source.env").read_text().splitlines()
+        )
+        head = subprocess.run(
+            ["git", "-C", "upstream", "rev-parse", "HEAD"],
             cwd=ROOT,
             check=True,
             capture_output=True,
             text=True,
-        ).stdout.split()[1]
-        self.assertEqual(settings["ZED_HEAD_SHA"], gitlink)
+        ).stdout.strip()
 
-    def test_canary_defaults_to_the_cargo_product(self):
-        workflow = (WORKFLOWS / "canary-dispatch.yml").read_text()
+        self.assertEqual(source["ZED_HEAD_SHA"], head)
 
-        self.assertIn("uses: ./.github/workflows/zed-cargo-product.yml", workflow)
-        self.assertNotIn("zed-sccache", workflow)
+    def test_release_recipe_and_layer_contract(self):
+        subprocess.run(
+            [sys.executable, str(ROOT / "scripts/verify-zed-release-recipe.py"), "upstream"],
+            cwd=ROOT,
+            check=True,
+        )
 
 
 if __name__ == "__main__":

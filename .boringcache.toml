@@ -1,26 +1,31 @@
 workspace = "boringcache/benchmark-zed"
 
-# Cargo's registry and git sources are common dependency state. The Cargo
-# adapter composes them with the correctness-preserving target snapshot and
-# its native sccache backend in one lifecycle.
+# The root plan owns the persistent rolling chain. The release matrix uses
+# separate committed plans under plans/ so each Cargo layer can be judged
+# independently without rewriting this file in a workflow.
 
 [entries.cargo-registry]
-tag = "zed-cargo-registry-local"
+tag = "zed-cargo-rolling-main-registry"
 
 [entries.cargo-git]
-tag = "zed-cargo-git-local"
+tag = "zed-cargo-rolling-main-git"
 
 [entries.zed-target]
 kind = "cargo-target"
-tag = "zed-target-local"
+tag = "zed-cargo-rolling-main-target"
 path = "upstream/target"
 
 [profiles.cargo-product]
 entries = ["cargo-registry", "cargo-git", "zed-target"]
 
+[adapters.sccache]
+tag = "zed-cargo-rolling-main-sccache"
+no-git = true
+metadata-hints = ["benchmark=zed", "lane=rolling", "layer=compiler"]
+
 [adapters.cargo]
-tag = "zed-sccache-local"
 profiles = ["cargo-product"]
+compiler-cache = "sccache"
 no-git = true
 metadata-hints = ["benchmark=zed", "lane=cargo-product"]
 command = ["cargo", "build", "--release", "--locked", "--message-format=json-render-diagnostics"]
