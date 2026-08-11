@@ -63,7 +63,7 @@ jobs:
     name: "Cold: target + sccache seed"
     needs: source
     if: inputs.runner_label == '' || github.ref_name == 'main'
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -138,7 +138,7 @@ jobs:
   target-only:
     name: "Target only: compiler cache disabled"
     needs: [source, cold]
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -215,7 +215,7 @@ jobs:
   sccache-only:
     name: "sccache only: target excluded"
     needs: [source, cold]
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -290,7 +290,7 @@ jobs:
   combined:
     name: "Combined: target + sccache"
     needs: [source, cold]
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
