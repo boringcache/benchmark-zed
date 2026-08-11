@@ -10,12 +10,12 @@ on:
         type: string
         default: ""
       base_sha:
-        description: Seed commit. Defaults to benchmark-source.env.
+        description: Seed commit. Defaults to cargo-layer-source.env.
         required: false
         type: string
         default: ""
       head_sha:
-        description: Adjacent commit built by every warm lane. Defaults to benchmark-source.env.
+        description: Adjacent commit built by every warm lane. Defaults to cargo-layer-source.env.
         required: false
         type: string
         default: ""
@@ -55,7 +55,7 @@ jobs:
           INPUT_HEAD_SHA: ${{ inputs.head_sha }}
         run: |
           set -euo pipefail
-          source benchmark-source.env
+          source cargo-layer-source.env
           echo "base_sha=${INPUT_BASE_SHA:-$ZED_BASE_SHA}" >> "$GITHUB_OUTPUT"
           echo "head_sha=${INPUT_HEAD_SHA:-$ZED_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
@@ -165,7 +165,6 @@ jobs:
           mode: cargo
           trust-policy: restore
           working-directory: upstream
-          fail-on-cache-miss: true
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-target-only-primary
@@ -317,7 +316,6 @@ jobs:
           mode: cargo
           trust-policy: restore
           working-directory: upstream
-          fail-on-cache-miss: true
           fail-on-cache-error: true
           diagnostics: summary
           metadata-hints: phase=matrix-combined-primary

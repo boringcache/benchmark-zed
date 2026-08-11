@@ -115,6 +115,8 @@ def verify_upstream(upstream: Path, contract: dict[str, str]) -> None:
 
 
 def verify_plans() -> None:
+    source = read_settings(ROOT / "cargo-layer-source.env")
+    cohort = source["ZED_HEAD_SHA"][:7]
     target_tags: set[str] = set()
     compiler_tags: set[str] = set()
     dependency_tag_pairs: set[tuple[str, str]] = set()
@@ -142,6 +144,11 @@ def verify_plans() -> None:
             require(cargo["no-git"] is True, f"{path} must use stable reviewed tags")
 
             config_entries = plan["entries"]
+            for entry in config_entries.values():
+                require(
+                    cohort in entry["tag"],
+                    f"{path} does not carry the pinned layer-source identity",
+                )
             target_tags.add(config_entries["zed-target"]["tag"])
             dependency_tag_pairs.add(
                 (
@@ -155,6 +162,10 @@ def verify_plans() -> None:
                     f"{path} must give sccache an independent identity",
                 )
                 compiler_tags.add(plan["adapters"]["sccache"]["tag"])
+                require(
+                    cohort in plan["adapters"]["sccache"]["tag"],
+                    f"{path} compiler tag does not carry the pinned layer-source identity",
+                )
             else:
                 require(
                     "sccache" not in plan["adapters"],
@@ -178,6 +189,10 @@ def verify_workflows() -> None:
 
     require("scope-boringcache-run" not in all_workflows, "Workflows must not rewrite tags")
     require("mode: sccache" not in all_workflows, "Cargo owns the composed lifecycle")
+    require(
+        "source cargo-layer-source.env" in matrix,
+        "The layer matrix must not follow the moving rolling source",
+    )
     require(
         "boringcache/one@ab52a39d3d7358c22b359a6ffbf86cf74be9bf56" in matrix,
         "The matrix must use released One 1.18.1",
@@ -210,7 +225,7 @@ def verify_workflows() -> None:
 
 def verify(upstream: Path) -> str:
     contract = read_settings(ROOT / "scripts/zed-release-recipe.env")
-    source = read_settings(ROOT / "benchmark-source.env")
+    source = read_settings(ROOT / "cargo-layer-source.env")
     verify_upstream(upstream, contract)
     verify_plans()
     verify_workflows()
