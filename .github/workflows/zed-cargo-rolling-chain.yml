@@ -103,7 +103,7 @@ jobs:
       
       - name: Run the released Cargo product
         id: cache
-        uses: boringcache/one@1d01e5dbf19ce259f921aa353d5e3e4ac5f942e4 # v1 / 1.19.0
+        uses: boringcache/one@e24257b122813ad11d53b9ed024b474ca4946ad2 # v1 / 1.19.1
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
