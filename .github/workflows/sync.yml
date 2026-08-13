@@ -6,7 +6,7 @@ on:
     - cron: "28,58 * * * *"
 
 permissions:
-  actions: read
+  actions: write
   contents: write
 
 concurrency:
@@ -23,12 +23,12 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
-          token: ${{ secrets.BOT_PUBLIC_GITHUB_TOKEN }}
+          token: ${{ github.token }}
 
       - name: Advance the adjacent source pair
         id: source
         env:
-          GH_TOKEN: ${{ secrets.BOT_PUBLIC_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: ./scripts/advance-source-pair.sh benchmark-source.env ZED
 
       - name: Pin the adjacent Zed head
@@ -42,8 +42,10 @@ jobs:
           test "$(git -C upstream rev-parse HEAD)" = "$ZED_HEAD_SHA"
 
       - name: Commit the upstream update
+        id: sync
         run: |
           set -euo pipefail
+          echo "updated=false" >> "$GITHUB_OUTPUT"
           if git diff --quiet -- benchmark-source.env upstream; then
             echo "No upstream changes"
             exit 0
@@ -54,3 +56,16 @@ jobs:
           git add benchmark-source.env upstream
           git commit -m "Update upstream to ${{ steps.source.outputs.source_repository }}@${{ steps.source.outputs.source_short_sha }}"
           git push origin HEAD:main
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch rolling benchmark
+        if: steps.sync.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source benchmark-source.env
+          gh workflow run zed-cargo-rolling-chain.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "base_sha=${ZED_BASE_SHA}" \
+            -f "head_sha=${ZED_HEAD_SHA}"
