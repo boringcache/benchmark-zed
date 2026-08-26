@@ -40,6 +40,9 @@ case "$comparison_status" in
 esac
 
 if [[ -z "$next_head" ]]; then
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "updated=false" >> "$GITHUB_OUTPUT"
+  fi
   echo "No upstream changes"
   exit 0
 fi
@@ -62,9 +65,12 @@ rm -f "${env_file}.bak"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
+    echo "updated=true"
     echo "source_repository=${source_repository}"
     echo "source_sha=${next_head}"
     echo "source_short_sha=${next_head:0:7}"
+    echo "base_sha=${current_head}"
+    echo "head_sha=${next_head}"
   } >> "$GITHUB_OUTPUT"
 fi
 

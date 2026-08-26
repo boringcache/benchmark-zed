@@ -1,14 +1,11 @@
 name: "Zed Cargo rolling run"
-run-name: ${{ github.event_name == 'push' && 'Zed Cargo rolling pinned source update' || format('Zed Cargo rolling {0} to {1}', inputs.base_sha, inputs.head_sha) }}
+run-name: ${{ format('Zed Cargo rolling {0} to {1}', inputs.base_sha, inputs.head_sha) }}
 
 on:
-  push:
-    branches: [main]
-    paths: ["benchmark-source.env"]
-  workflow_dispatch:
+  workflow_call:
     inputs:
       cli_version:
-        description: Exact immutable BoringCache CLI release tag.
+        description: Optional exact immutable BoringCache CLI release tag.
         required: false
         type: string
         default: ""
@@ -25,14 +22,15 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      BORINGCACHE_RESTORE_TOKEN:
+        required: true
+      BORINGCACHE_SAVE_TOKEN:
+        required: true
 
 permissions:
   actions: read
   contents: read
-
-concurrency:
-  group: benchmark-zed-cargo-rolling-chain
-  cancel-in-progress: false
 
 jobs:
   source:
@@ -44,19 +42,26 @@ jobs:
       source_repository: ${{ steps.source.outputs.ZED_SOURCE_REPOSITORY }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
       - name: Read pinned source
         id: source
-        run: sed '/^$/d' benchmark-source.env >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          set -euo pipefail
+          source benchmark-source.env
+          test "$INPUT_BASE_SHA" = "$ZED_HEAD_SHA"
+          sed '/^$/d' benchmark-source.env >> "$GITHUB_OUTPUT"
 
   advance:
     name: BoringCache Zed Cargo commit
     needs: source
-    if: inputs.runner_label == '' || github.ref_name == 'main'
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     env:
-      RESOLVED_BASE_SHA: ${{ github.event_name == 'push' && needs.source.outputs.base_sha || inputs.base_sha }}
-      RESOLVED_HEAD_SHA: ${{ github.event_name == 'push' && needs.source.outputs.head_sha || inputs.head_sha }}
+      RESOLVED_BASE_SHA: ${{ inputs.base_sha }}
+      RESOLVED_HEAD_SHA: ${{ inputs.head_sha }}
     steps:
       - name: Start the workflow timer
         id: workflow_timer
@@ -64,6 +69,8 @@ jobs:
       
       - name: Checkout benchmark repository
         uses: actions/checkout@v6
+        with:
+          ref: main
 
       - name: Checkout the adjacent Zed head
         run: |
@@ -115,6 +122,8 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          BORINGCACHE_ZED_BASE_SHA: ${{ env.RESOLVED_BASE_SHA }}
+          BORINGCACHE_ZED_HEAD_SHA: ${{ env.RESOLVED_HEAD_SHA }}
 
       - name: Capture the build timing
         id: build_timing
@@ -126,6 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           test -x upstream/target/release/zed
+          test "$(cat upstream/target/.boringcache-zed-source-sha)" = "$RESOLVED_HEAD_SHA"
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
       - name: Write the benchmark phase evidence

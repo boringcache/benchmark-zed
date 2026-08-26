@@ -12,7 +12,7 @@ tag = "zed-cargo-rolling-main-git"
 
 [entries.zed-target]
 kind = "cargo-target"
-tag = "zed-cargo-rolling-main-target"
+tag = "zed-cargo-rolling-main-target-v2"
 path = "upstream/target"
 
 [profiles.cargo-product]
@@ -28,4 +28,4 @@ profiles = ["cargo-product"]
 compiler-cache = "sccache"
 no-git = true
 metadata-hints = ["benchmark=zed", "lane=cargo-product"]
-command = ["cargo", "build", "--release", "--locked", "--message-format=json-render-diagnostics"]
+command = ["../scripts/run-zed-rolling-build.sh"]

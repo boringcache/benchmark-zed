@@ -1,0 +1,43 @@
+name: "Zed Cargo rolling manual run"
+run-name: ${{ format('Zed Cargo rolling {0} to {1}', inputs.base_sha, inputs.head_sha) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: Optional exact immutable BoringCache CLI release tag.
+        required: false
+        type: string
+        default: ""
+      base_sha:
+        description: Source commit currently represented by the published target.
+        required: true
+        type: string
+      head_sha:
+        description: Immediate child commit to build and publish as the next seed.
+        required: true
+        type: string
+      runner_label:
+        description: Optional runner label for a manual main-branch experiment.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: benchmark-zed-cargo-rolling-chain
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Benchmark the adjacent Zed commit
+    uses: ./.github/workflows/zed-cargo-rolling-chain.yml
+    with:
+      cli_version: ${{ inputs.cli_version }}
+      base_sha: ${{ inputs.base_sha }}
+      head_sha: ${{ inputs.head_sha }}
+      runner_label: ${{ inputs.runner_label }}
+    secrets: inherit
