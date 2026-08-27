@@ -122,8 +122,6 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
-          BORINGCACHE_ZED_BASE_SHA: ${{ env.RESOLVED_BASE_SHA }}
-          BORINGCACHE_ZED_HEAD_SHA: ${{ env.RESOLVED_HEAD_SHA }}
 
       - name: Capture the build timing
         id: build_timing
@@ -135,7 +133,6 @@ jobs:
         run: |
           set -euo pipefail
           test -x upstream/target/release/zed
-          test "$(cat upstream/target/.boringcache-zed-source-sha)" = "$RESOLVED_HEAD_SHA"
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
       - name: Write the benchmark phase evidence

@@ -221,6 +221,10 @@ def verify_workflows() -> None:
         "sccache" in root_plan["adapters"],
         "The rolling plan must give sccache an independent identity",
     )
+    require(
+        root_plan["adapters"]["cargo"]["command"][0] == "cargo",
+        "The rolling Cargo plan must execute Cargo directly",
+    )
 
 
 def verify(upstream: Path) -> str:

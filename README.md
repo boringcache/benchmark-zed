@@ -22,8 +22,7 @@ owns the independent release matrix.
 
 The scheduled rolling chain selects one adjacent commit, benchmarks and
 publishes it, and only then advances `benchmark-source.env` on `main`. The
-source SHA stored inside the target snapshot must match the next run's base
-SHA, so a stale target hit fails before Cargo rather than silently widening the
-commit range. Scheduled and manual rolling runs share one concurrency group;
-queued schedule ticks may collapse, but unbuilt source commits cannot be
-skipped.
+rolling build executes Cargo directly, as required by BoringCache's Cargo
+adapter. Scheduled and manual rolling runs share one concurrency group; queued
+schedule ticks may collapse, but the source pin cannot advance past an unbuilt
+commit.

@@ -80,84 +80,6 @@ class SourceSyncTest(unittest.TestCase):
         self.assertNotIn("push:", rolling)
         self.assertIn('test "$INPUT_BASE_SHA" = "$ZED_HEAD_SHA"', rolling)
 
-    def test_rolling_build_rejects_the_wrong_target_source(self):
-        base = "a" * 40
-        head = "b" * 40
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            target = root / "target"
-            target.mkdir()
-            (target / ".boringcache-zed-source-sha").write_text(f"{'c' * 40}\n")
-            bin_dir = root / "bin"
-            bin_dir.mkdir()
-            cargo = bin_dir / "cargo"
-            cargo.write_text("#!/usr/bin/env bash\ntouch cargo-ran\n")
-            cargo.chmod(0o755)
-
-            result = subprocess.run(
-                [str(ROOT / "scripts/run-zed-rolling-build.sh")],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                env={
-                    **os.environ,
-                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
-                    "BORINGCACHE_ZED_BASE_SHA": base,
-                    "BORINGCACHE_ZED_HEAD_SHA": head,
-                },
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(f"expected {base}", result.stderr)
-            self.assertFalse((root / "cargo-ran").exists())
-
-    def test_rolling_build_marks_a_cold_seed_and_matching_advance(self):
-        base = "a" * 40
-        head = "b" * 40
-        following = "c" * 40
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            bin_dir = root / "bin"
-            bin_dir.mkdir()
-            cargo = bin_dir / "cargo"
-            cargo.write_text("#!/usr/bin/env bash\nmkdir -p target\ntouch cargo-ran\n")
-            cargo.chmod(0o755)
-            env = {
-                **os.environ,
-                "PATH": f"{bin_dir}:{os.environ['PATH']}",
-                "BORINGCACHE_ZED_BASE_SHA": base,
-                "BORINGCACHE_ZED_HEAD_SHA": head,
-            }
-
-            subprocess.run(
-                [str(ROOT / "scripts/run-zed-rolling-build.sh")],
-                cwd=root,
-                check=True,
-                env=env,
-            )
-            marker = root / "target" / ".boringcache-zed-source-sha"
-            self.assertEqual(marker.read_text().strip(), head)
-
-            env["BORINGCACHE_ZED_BASE_SHA"] = head
-            env["BORINGCACHE_ZED_HEAD_SHA"] = following
-            subprocess.run(
-                [str(ROOT / "scripts/run-zed-rolling-build.sh")],
-                cwd=root,
-                check=True,
-                env=env,
-            )
-            self.assertEqual(marker.read_text().strip(), following)
-
-            env["BORINGCACHE_ZED_BASE_SHA"] = head
-            subprocess.run(
-                [str(ROOT / "scripts/run-zed-rolling-build.sh")],
-                cwd=root,
-                check=True,
-                env=env,
-            )
-            self.assertEqual(marker.read_text().strip(), following)
-
-
 class CargoLayerPlanTest(unittest.TestCase):
     def test_each_layer_choice_is_a_committed_cli_plan(self):
         target_tags = set()
@@ -222,7 +144,13 @@ class CargoLayerPlanTest(unittest.TestCase):
         )
         self.assertEqual(
             plan["adapters"]["cargo"]["command"],
-            ["../scripts/run-zed-rolling-build.sh"],
+            [
+                "cargo",
+                "build",
+                "--release",
+                "--locked",
+                "--message-format=json-render-diagnostics",
+            ],
         )
 
     def test_source_pair_matches_the_pinned_submodule(self):
