@@ -212,6 +212,13 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertEqual(matrix.count("mode: cargo"), 8)
         self.assertIn("inputs.cli_version", matrix)
         self.assertIn("Action default", matrix)
+        self.assertEqual(
+            matrix.count(
+                "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+            ),
+            4,
+        )
+        self.assertEqual(matrix.count('python-version: "3.12"'), 4)
 
         for lane in LANES:
             for phase in ("primary", "remote-server"):
