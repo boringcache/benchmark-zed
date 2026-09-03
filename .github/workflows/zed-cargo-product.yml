@@ -68,6 +68,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
       - name: Prepare the seed source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.base_sha }}"
 
@@ -144,6 +149,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
       - name: Prepare the adjacent source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
 
@@ -215,6 +225,11 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
+
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
 
       - name: Prepare the adjacent source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
@@ -291,6 +306,11 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
+
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
 
       - name: Prepare the adjacent source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
