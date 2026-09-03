@@ -14,9 +14,14 @@ on:
         required: true
         type: string
       head_sha:
-        description: Immediate child commit to build and publish as the next seed.
+        description: Descendant commit to build and publish as the next seed.
         required: true
         type: string
+      source_distance:
+        description: Number of first-parent commits from base to head.
+        required: false
+        type: string
+        default: "1"
       runner_label:
         description: Optional runner label for a manual main-branch experiment.
         required: false
@@ -33,11 +38,12 @@ concurrency:
 
 jobs:
   benchmark:
-    name: Benchmark the adjacent Zed commit
+    name: Benchmark the selected Zed source
     uses: ./.github/workflows/zed-cargo-rolling-chain.yml
     with:
       cli_version: ${{ inputs.cli_version }}
       base_sha: ${{ inputs.base_sha }}
       head_sha: ${{ inputs.head_sha }}
+      source_distance: ${{ inputs.source_distance }}
       runner_label: ${{ inputs.runner_label }}
     secrets: inherit

@@ -7,6 +7,7 @@ on:
 
 permissions:
   actions: read
+  checks: read
   contents: write
 
 concurrency:
@@ -24,6 +25,8 @@ jobs:
       updated: ${{ steps.source.outputs.updated }}
       base_sha: ${{ steps.source.outputs.base_sha }}
       head_sha: ${{ steps.source.outputs.head_sha }}
+      source_distance: ${{ steps.source.outputs.source_distance }}
+      skipped_source_count: ${{ steps.source.outputs.skipped_source_count }}
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -33,20 +36,37 @@ jobs:
           submodules: false
           token: ${{ github.token }}
 
-      - name: Advance the adjacent source pair
+      - name: Select the next dependency-verified source
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/advance-source-pair.sh benchmark-source.env ZED
+        run: ./scripts/advance-source-pair.sh benchmark-source.env ZED check_dependencies
+
+      - name: Summarize source selection
+        if: steps.source.outputs.updated == 'true'
+        env:
+          BASE_SHA: ${{ steps.source.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+          SOURCE_DISTANCE: ${{ steps.source.outputs.source_distance }}
+          SKIPPED_SOURCE_COUNT: ${{ steps.source.outputs.skipped_source_count }}
+        run: |
+          {
+            echo "## Zed source selection"
+            echo
+            echo "- Source: \`${BASE_SHA}\` → \`${HEAD_SHA}\`"
+            echo "- Commit distance: \`${SOURCE_DISTANCE}\`"
+            echo "- Commits without a successful upstream dependency check: \`${SKIPPED_SOURCE_COUNT}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   benchmark:
-    name: Benchmark the adjacent Zed commit
+    name: Benchmark the next dependency-verified Zed source
     needs: source
     if: needs.source.outputs.updated == 'true'
     uses: ./.github/workflows/zed-cargo-rolling-chain.yml
     with:
       base_sha: ${{ needs.source.outputs.base_sha }}
       head_sha: ${{ needs.source.outputs.head_sha }}
+      source_distance: ${{ needs.source.outputs.source_distance }}
     secrets: inherit
 
   publish-source:
@@ -72,7 +92,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ./scripts/advance-source-pair.sh benchmark-source.env ZED
+          ./scripts/advance-source-pair.sh benchmark-source.env ZED check_dependencies
           source benchmark-source.env
           test "$ZED_BASE_SHA" = "$EXPECTED_BASE_SHA"
           test "$ZED_HEAD_SHA" = "$EXPECTED_HEAD_SHA"

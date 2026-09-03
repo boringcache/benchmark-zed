@@ -19,9 +19,22 @@ LANES = {
 
 
 class SourceSyncTest(unittest.TestCase):
-    def test_advances_exactly_one_upstream_commit(self):
+    def test_skips_sources_without_a_successful_required_check(self):
         current = "a" * 40
-        following = "b" * 40
+        failed = "b" * 40
+        skipped = "c" * 40
+        following = "d" * 40
+        comparison = json.dumps(
+            {
+                "status": "ahead",
+                "commits": [
+                    {"sha": failed, "parents": [{"sha": current}]},
+                    {"sha": skipped, "parents": [{"sha": failed}]},
+                    {"sha": following, "parents": [{"sha": skipped}]},
+                ],
+            },
+            separators=(",", ":"),
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "benchmark-source.env"
@@ -38,8 +51,13 @@ class SourceSyncTest(unittest.TestCase):
                 "case \"$*\" in\n"
                 "  'api repos/zed-industries/zed --jq .default_branch') echo main ;;\n"
                 f"  'api repos/zed-industries/zed/compare/{current}...main') "
-                f"echo '{{\"status\":\"ahead\",\"commits\":[{{\"sha\":\"{following}\"}}]}}' ;;\n"
-                f"  'api repos/zed-industries/zed/commits/{following} --jq .parents[0].sha // empty') echo {current} ;;\n"
+                f"echo '{comparison}' ;;\n"
+                f"  'api repos/zed-industries/zed/commits/{failed}/check-runs?filter=latest&per_page=100') "
+                "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"completed\",\"conclusion\":\"failure\"}]}' ;;\n"
+                f"  'api repos/zed-industries/zed/commits/{skipped}/check-runs?filter=latest&per_page=100') "
+                "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]}' ;;\n"
+                f"  'api repos/zed-industries/zed/commits/{following}/check-runs?filter=latest&per_page=100') "
+                "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"completed\",\"conclusion\":\"success\"}]}' ;;\n"
                 "  *) echo \"Unexpected gh call: $*\" >&2; exit 1 ;;\n"
                 "esac\n"
             )
@@ -47,7 +65,12 @@ class SourceSyncTest(unittest.TestCase):
 
             output = root / "github-output"
             subprocess.run(
-                [str(ROOT / "scripts/advance-source-pair.sh"), str(source), "ZED"],
+                [
+                    str(ROOT / "scripts/advance-source-pair.sh"),
+                    str(source),
+                    "ZED",
+                    "check_dependencies",
+                ],
                 check=True,
                 env={
                     **os.environ,
@@ -63,6 +86,69 @@ class SourceSyncTest(unittest.TestCase):
         self.assertEqual(outputs["updated"], "true")
         self.assertEqual(outputs["base_sha"], current)
         self.assertEqual(outputs["head_sha"], following)
+        self.assertEqual(outputs["source_distance"], "3")
+        self.assertEqual(outputs["skipped_source_count"], "2")
+        self.assertEqual(outputs["skipped_source_shas"], f"{failed},{skipped}")
+
+    def test_waits_for_the_first_unchecked_source(self):
+        current = "a" * 40
+        pending = "b" * 40
+        following = "c" * 40
+        comparison = json.dumps(
+            {
+                "status": "ahead",
+                "commits": [
+                    {"sha": pending, "parents": [{"sha": current}]},
+                    {"sha": following, "parents": [{"sha": pending}]},
+                ],
+            },
+            separators=(",", ":"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "benchmark-source.env"
+            original = (
+                "ZED_SOURCE_REPOSITORY=zed-industries/zed\n"
+                f"ZED_BASE_SHA={'0' * 40}\n"
+                f"ZED_HEAD_SHA={current}\n"
+            )
+            source.write_text(original)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text(
+                "#!/usr/bin/env bash\n"
+                "case \"$*\" in\n"
+                "  'api repos/zed-industries/zed --jq .default_branch') echo main ;;\n"
+                f"  'api repos/zed-industries/zed/compare/{current}...main') "
+                f"echo '{comparison}' ;;\n"
+                f"  'api repos/zed-industries/zed/commits/{pending}/check-runs?filter=latest&per_page=100') "
+                "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"in_progress\",\"conclusion\":null}]}' ;;\n"
+                "  *) echo \"Unexpected gh call: $*\" >&2; exit 1 ;;\n"
+                "esac\n"
+            )
+            gh.chmod(0o755)
+
+            output = root / "github-output"
+            subprocess.run(
+                [
+                    str(ROOT / "scripts/advance-source-pair.sh"),
+                    str(source),
+                    "ZED",
+                    "check_dependencies",
+                ],
+                check=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "GITHUB_OUTPUT": str(output),
+                },
+            )
+            source_text = source.read_text()
+            output_text = output.read_text()
+
+        self.assertEqual(source_text, original)
+        self.assertEqual(output_text, "updated=false\n")
 
     def test_rolling_workflow_advances_main_only_after_the_benchmark(self):
         sync = (WORKFLOWS / "sync.yml").read_text()
@@ -79,6 +165,12 @@ class SourceSyncTest(unittest.TestCase):
         self.assertNotIn("workflow_dispatch:", rolling)
         self.assertNotIn("push:", rolling)
         self.assertIn('test "$INPUT_BASE_SHA" = "$ZED_HEAD_SHA"', rolling)
+        self.assertIn(
+            "advance-source-pair.sh benchmark-source.env ZED check_dependencies",
+            sync,
+        )
+        self.assertIn("checks: read", sync)
+        self.assertIn("source_distance: ${{ needs.source.outputs.source_distance }}", sync)
 
 class CargoLayerPlanTest(unittest.TestCase):
     def test_each_layer_choice_is_a_committed_cli_plan(self):

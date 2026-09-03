@@ -14,9 +14,14 @@ on:
         required: true
         type: string
       head_sha:
-        description: Immediate child commit to build and publish as the next seed.
+        description: Dependency-verified descendant to build and publish as the next seed.
         required: true
         type: string
+      source_distance:
+        description: Number of first-parent commits from the published seed to the selected source.
+        required: false
+        type: string
+        default: "1"
       runner_label:
         description: Optional runner label for a manual main-branch experiment.
         required: false
@@ -62,6 +67,7 @@ jobs:
     env:
       RESOLVED_BASE_SHA: ${{ inputs.base_sha }}
       RESOLVED_HEAD_SHA: ${{ inputs.head_sha }}
+      RESOLVED_SOURCE_DISTANCE: ${{ inputs.source_distance }}
     steps:
       - name: Start the workflow timer
         id: workflow_timer
@@ -72,15 +78,22 @@ jobs:
         with:
           ref: main
 
-      - name: Checkout the adjacent Zed head
+      - name: Checkout the selected Zed source
         run: |
           set -euo pipefail
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
-          git -C upstream fetch --no-tags --depth 2 origin "$RESOLVED_HEAD_SHA"
+          test "$(git -C upstream rev-parse HEAD)" = "$RESOLVED_BASE_SHA"
+          if [[ ! "$RESOLVED_SOURCE_DISTANCE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid source distance: $RESOLVED_SOURCE_DISTANCE" >&2
+            exit 1
+          fi
+          fetch_depth=$((RESOLVED_SOURCE_DISTANCE + 1))
+          git -C upstream fetch --no-tags --depth "$fetch_depth" origin "$RESOLVED_HEAD_SHA"
           git -C upstream checkout --detach "$RESOLVED_HEAD_SHA"
           test "$(git -C upstream rev-parse HEAD)" = "$RESOLVED_HEAD_SHA"
-          test "$(git -C upstream rev-parse HEAD^)" = "$RESOLVED_BASE_SHA"
+          git -C upstream merge-base --is-ancestor "$RESOLVED_BASE_SHA" "$RESOLVED_HEAD_SHA"
+          test "$(git -C upstream rev-list --count "${RESOLVED_BASE_SHA}..${RESOLVED_HEAD_SHA}")" = "$RESOLVED_SOURCE_DISTANCE"
           git -C upstream clean -fdx
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
@@ -182,7 +195,8 @@ jobs:
             echo
             echo "- CLI: \`${{ inputs.cli_version }}\`"
             echo "- Source: \`${RESOLVED_BASE_SHA}\` → \`${RESOLVED_HEAD_SHA}\`"
-            echo "- Signed target available before the adjacent build: \`${{ steps.cache.outputs.cache-hit }}\`"
+            echo "- Commit distance: \`${RESOLVED_SOURCE_DISTANCE}\`"
+            echo "- Signed target available before the source build: \`${{ steps.cache.outputs.cache-hit }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain product evidence
