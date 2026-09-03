@@ -37,6 +37,11 @@ permissions:
   actions: read
   contents: read
 
+env:
+  ZED_BUNDLE: "true"
+  CC: clang
+  CXX: clang++
+
 jobs:
   source:
     name: Resolve Zed source
@@ -122,7 +127,7 @@ jobs:
       
       - name: Run the released Cargo product
         id: cache
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo

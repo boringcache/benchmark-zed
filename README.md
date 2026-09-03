@@ -10,6 +10,8 @@ measures source freshness against Zed itself, while the workflow remains only a
 lane/phase selector.
 The GitHub workflow selects those plans and leaves cache identity, target
 selection, and compiler-cache selection to the BoringCache CLI.
+Both release workflows select Clang and Clang++ explicitly, matching Zed's
+Linux bundle recipe even when sccache wraps the C and C++ compilers.
 
 [`cargo-layer-source.env`](cargo-layer-source.env) pins the reviewed adjacent
 source pair for that matrix independently of the continuously advancing rolling

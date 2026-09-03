@@ -195,9 +195,14 @@ def verify_workflows() -> None:
         "source cargo-layer-source.env" in matrix,
         "The layer matrix must not follow the moving rolling source",
     )
+    stable_action = "boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5"
     require(
-        "boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c" in matrix,
-        "The matrix must use released One 1.20.0",
+        all_workflows.count(stable_action) == 9,
+        "Every Cargo lane must use released One 1.20.1",
+    )
+    require(
+        all_workflows.count("CXX: clang++") == 2,
+        "Every Zed release workflow must select clang++ for C++ dependencies",
     )
     for lane in LANES:
         for phase in PHASES:

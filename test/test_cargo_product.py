@@ -212,9 +212,18 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertNotIn("fail-on-cache-miss", matrix)
         self.assertNotIn("cache_scope:", rolling)
         self.assertEqual(matrix.count("mode: cargo"), 8)
+        self.assertEqual(
+            workflow_text.count(
+                "boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5"
+            ),
+            9,
+        )
         self.assertIn("inputs.cli_version", matrix)
         self.assertIn("Action default", matrix)
         self.assertIn("./scripts/install-zed-toolchain.sh", rolling)
+        self.assertEqual(workflow_text.count("CXX: clang++"), 2)
+        self.assertEqual(workflow_text.count("CC: clang"), 2)
+        self.assertEqual(workflow_text.count('ZED_BUNDLE: "true"'), 2)
         self.assertEqual(
             rolling.count(
                 "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"

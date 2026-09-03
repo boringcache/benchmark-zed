@@ -37,6 +37,7 @@ env:
   CARGO_INCREMENTAL: "0"
   ZED_BUNDLE: "true"
   CC: clang
+  CXX: clang++
 
 jobs:
   source:
@@ -93,7 +94,7 @@ jobs:
 
       - name: Build the primary seed through the combined Cargo plan
         id: primary
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -111,7 +112,7 @@ jobs:
 
       - name: Build the remote server seed through the combined Cargo plan
         id: remote
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -169,7 +170,7 @@ jobs:
 
       - name: Build primary with the target-only Cargo plan
         id: primary
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -187,7 +188,7 @@ jobs:
 
       - name: Build remote server with the target-only Cargo plan
         id: remote
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -251,7 +252,7 @@ jobs:
 
       - name: Build primary with the sccache-only Cargo plan
         id: primary
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -269,7 +270,7 @@ jobs:
 
       - name: Build remote server with the sccache-only Cargo plan
         id: remote
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -332,7 +333,7 @@ jobs:
 
       - name: Build primary with the combined Cargo plan
         id: primary
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
@@ -350,7 +351,7 @@ jobs:
 
       - name: Build remote server with the combined Cargo plan
         id: remote
-        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
+        uses: boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5 # v1 / 1.20.1
         with:
           cli-version: ${{ inputs.cli_version }}
           mode: cargo
