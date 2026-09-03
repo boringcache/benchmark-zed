@@ -241,7 +241,6 @@ class CargoLayerPlanTest(unittest.TestCase):
                 "build",
                 "--release",
                 "--locked",
-                "--message-format=json-render-diagnostics",
             ],
         )
 
