@@ -165,6 +165,8 @@ class SourceSyncTest(unittest.TestCase):
         self.assertNotIn("workflow_dispatch:", rolling)
         self.assertNotIn("push:", rolling)
         self.assertIn('test "$INPUT_BASE_SHA" = "$ZED_HEAD_SHA"', rolling)
+        self.assertIn('=~ ^[0-9]+$', rolling)
+        self.assertIn("use 0 to replay the published source", manual)
         self.assertIn(
             "advance-source-pair.sh benchmark-source.env ZED check_dependencies",
             sync,
@@ -212,6 +214,14 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertEqual(matrix.count("mode: cargo"), 8)
         self.assertIn("inputs.cli_version", matrix)
         self.assertIn("Action default", matrix)
+        self.assertIn("./scripts/install-zed-toolchain.sh", rolling)
+        self.assertEqual(
+            rolling.count(
+                "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+            ),
+            1,
+        )
+        self.assertEqual(rolling.count('python-version: "3.12"'), 1)
         self.assertEqual(
             matrix.count(
                 "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
