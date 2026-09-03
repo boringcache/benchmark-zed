@@ -15,12 +15,15 @@ path = "target"
 entries = ["cargo-registry", "cargo-git", "zed-target"]
 
 [adapters.cargo]
+tag = "zed-cargo-layers-1181-d4010e9-r4-cargo"
 profiles = ["cargo-product"]
 compiler-cache = "none"
 no-git = true
 metadata-hints = ["benchmark=zed-cargo-layers", "lane=target-only", "phase=remote-server"]
 command = [
   "cargo",
+  "--config",
+  ".cargo/bundle-config.toml",
   "build",
   "--release",
   "--target",

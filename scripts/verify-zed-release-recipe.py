@@ -50,6 +50,8 @@ def expected_command(phase: str) -> list[str]:
     target, packages = PHASES[phase]
     command = [
         "cargo",
+        "--config",
+        ".cargo/bundle-config.toml",
         "build",
         "--release",
         "--target",
@@ -97,16 +99,16 @@ def verify_upstream(upstream: Path, contract: dict[str, str]) -> None:
     )
 
     expected_builds = [
-        'cargo build --release --target "${target_triple}" '
+        'cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" '
         f'--package {contract["ZED_PRIMARY_PACKAGE"]} '
         f'--package {contract["ZED_PRIMARY_COMPANION_PACKAGE"]}',
-        'cargo build --release --target "${remote_server_triple}" '
+        'cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" '
         f'--package {contract["ZED_REMOTE_SERVER_PACKAGE"]}',
     ]
     actual_builds = [
         line.strip()
         for line in bundle.splitlines()
-        if line.strip().startswith("cargo build ")
+        if line.strip().startswith("cargo ") and " build " in line
     ]
     require(
         actual_builds == expected_builds,
@@ -195,7 +197,7 @@ def verify_workflows() -> None:
     )
     require(
         "boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c" in matrix,
-        "The matrix must use released One 1.19.7",
+        "The matrix must use released One 1.20.0",
     )
     for lane in LANES:
         for phase in PHASES:

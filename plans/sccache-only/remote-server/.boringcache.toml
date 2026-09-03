@@ -20,12 +20,15 @@ no-git = true
 metadata-hints = ["benchmark=zed-cargo-layers", "layer=compiler"]
 
 [adapters.cargo]
+tag = "zed-cargo-layers-1181-d4010e9-r4-cargo"
 profiles = ["cargo-product"]
 compiler-cache = "sccache"
 no-git = true
 metadata-hints = ["benchmark=zed-cargo-layers", "lane=sccache-only", "phase=remote-server"]
 command = [
   "cargo",
+  "--config",
+  ".cargo/bundle-config.toml",
   "build",
   "--release",
   "--target",

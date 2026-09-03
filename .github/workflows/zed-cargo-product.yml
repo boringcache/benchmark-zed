@@ -71,6 +71,11 @@ jobs:
       - name: Prepare the seed source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.base_sha }}"
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
       - name: Require an empty target
         run: test ! -e upstream/target
 
@@ -86,13 +91,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: publish
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-cold-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
@@ -106,13 +109,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: publish
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-cold-remote-server
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
@@ -161,13 +162,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-target-only-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
@@ -181,13 +180,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-target-only-remote-server
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
@@ -222,6 +219,11 @@ jobs:
       - name: Prepare the adjacent source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
       - name: Require an empty target
         run: test ! -e upstream/target
 
@@ -237,13 +239,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-sccache-only-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
@@ -257,13 +257,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-sccache-only-remote-server
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
@@ -297,6 +295,11 @@ jobs:
       - name: Prepare the adjacent source and release toolchain
         run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
       - name: Require an empty target
         run: test ! -e upstream/target
 
@@ -312,13 +315,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-combined-primary
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""
@@ -332,13 +333,11 @@ jobs:
         uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
-          setup: none
           mode: cargo
           trust-policy: restore
           working-directory: upstream
           fail-on-cache-error: true
           diagnostics: summary
-          metadata-hints: phase=matrix-combined-remote-server
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ""

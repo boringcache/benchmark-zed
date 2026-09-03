@@ -148,10 +148,27 @@ def evidence_product_refs(evidence: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def evidence_restore_phase(evidence: dict[str, Any] | None) -> dict[str, Any]:
+    if not evidence:
+        return {}
+    phases = evidence.get("phases")
+    if not isinstance(phases, dict):
+        return {}
+    restore = phases.get("restore")
+    return restore if isinstance(restore, dict) else {}
+
+
+def evidence_string(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
 def write_phase(args: argparse.Namespace) -> int:
     cache_hit = optional_bool(args.cache_hit)
     import_ready = optional_bool(args.cache_import_ready)
     evidence = load_evidence(args.evidence)
+    restore_evidence = evidence_restore_phase(evidence)
+    cache_tag = args.cache_tag or evidence_string(restore_evidence.get("cache_tag"))
+    workspace = args.workspace or evidence_string(restore_evidence.get("workspace"))
     total_seconds = args.restore_or_setup_seconds + args.build_seconds
 
     payload = {
@@ -173,8 +190,8 @@ def write_phase(args: argparse.Namespace) -> int:
             "hit": cache_hit,
             "import_ready": import_ready,
             "import_refs": len([ref for ref in args.cache_import_refs.splitlines() if ref.strip()]),
-            "tag": args.cache_tag or None,
-            "workspace": args.workspace or None,
+            "tag": cache_tag or None,
+            "workspace": workspace or None,
             "storage_bytes": None,
             "storage_source": None,
         },
