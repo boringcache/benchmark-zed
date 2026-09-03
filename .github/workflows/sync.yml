@@ -1,0 +1,98 @@
+name: "Sync Upstream"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "28,58 * * * *"
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  # Keep source selection, the rolling build, and the source-pin commit in one
+  # serialized run. GitHub only retains one pending run per concurrency group,
+  # so no source state may advance before the running benchmark succeeds.
+  group: benchmark-zed-cargo-rolling-chain
+  cancel-in-progress: false
+
+jobs:
+  source:
+    name: Select next Zed source
+    runs-on: ubuntu-24.04
+    outputs:
+      updated: ${{ steps.source.outputs.updated }}
+      base_sha: ${{ steps.source.outputs.base_sha }}
+      head_sha: ${{ steps.source.outputs.head_sha }}
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+          submodules: false
+          token: ${{ github.token }}
+
+      - name: Advance the adjacent source pair
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/advance-source-pair.sh benchmark-source.env ZED
+
+  benchmark:
+    name: Benchmark the adjacent Zed commit
+    needs: source
+    if: needs.source.outputs.updated == 'true'
+    uses: ./.github/workflows/zed-cargo-rolling-chain.yml
+    with:
+      base_sha: ${{ needs.source.outputs.base_sha }}
+      head_sha: ${{ needs.source.outputs.head_sha }}
+    secrets: inherit
+
+  publish-source:
+    name: Publish the verified Zed source
+    needs: [source, benchmark]
+    if: needs.source.outputs.updated == 'true' && needs.benchmark.result == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      EXPECTED_BASE_SHA: ${{ needs.source.outputs.base_sha }}
+      EXPECTED_HEAD_SHA: ${{ needs.source.outputs.head_sha }}
+    steps:
+      - name: Checkout benchmark repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+          submodules: false
+          token: ${{ github.token }}
+
+      - name: Advance the verified source pair
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ./scripts/advance-source-pair.sh benchmark-source.env ZED
+          source benchmark-source.env
+          test "$ZED_BASE_SHA" = "$EXPECTED_BASE_SHA"
+          test "$ZED_HEAD_SHA" = "$EXPECTED_HEAD_SHA"
+
+      - name: Pin the verified Zed head
+        run: |
+          set -euo pipefail
+          source benchmark-source.env
+          git submodule sync --recursive
+          git submodule update --init --checkout upstream
+          git -C upstream fetch --no-tags --depth 1 origin "$ZED_HEAD_SHA"
+          git -C upstream checkout --detach "$ZED_HEAD_SHA"
+          test "$(git -C upstream rev-parse HEAD)" = "$ZED_HEAD_SHA"
+
+      - name: Commit the verified upstream update
+        run: |
+          set -euo pipefail
+          git config user.name "boringcache-bot"
+          git config user.email "boringcache-bot@users.noreply.github.com"
+          git add benchmark-source.env upstream
+          test -n "$(git diff --cached --name-only)"
+          git commit -m "Update upstream to ${{ steps.source.outputs.source_repository }}@${{ steps.source.outputs.source_short_sha }}"
+          git push origin HEAD:main
