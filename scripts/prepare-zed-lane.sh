@@ -36,7 +36,8 @@ pinned="$(sed -n 's/^channel = "\(.*\)"$/\1/p' upstream/rust-toolchain.toml)"
 test -n "${pinned}"
 
 if ! command -v rustup >/dev/null 2>&1; then
-  rustup_init="$(mktemp)"
+  rustup_dir="$(mktemp -d)"
+  rustup_init="${rustup_dir}/rustup-init"
   curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL \
     https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
     -o "${rustup_init}"
@@ -45,6 +46,7 @@ if ! command -v rustup >/dev/null 2>&1; then
   chmod +x "${rustup_init}"
   "${rustup_init}" -y --default-toolchain "${pinned}" --profile minimal --no-modify-path
   rm "${rustup_init}"
+  rmdir "${rustup_dir}"
 
   cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
   export PATH="${cargo_bin}:${PATH}"
