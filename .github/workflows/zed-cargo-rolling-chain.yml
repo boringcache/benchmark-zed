@@ -78,6 +78,11 @@ jobs:
         with:
           ref: main
 
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
       - name: Checkout the selected Zed source
         run: |
           set -euo pipefail
@@ -97,19 +102,8 @@ jobs:
           git -C upstream clean -fdx
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev \
-            libglib2.0-dev libssl-dev pkg-config cmake \
-            libx11-dev libx11-xcb-dev libxcb1-dev \
-            libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev
-
-      - name: Install Zed's pinned Rust toolchain
-        working-directory: upstream
-        run: rustup show active-toolchain
+      - name: Install Zed's release toolchain
+        run: ./scripts/install-zed-toolchain.sh
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11

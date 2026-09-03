@@ -212,6 +212,14 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertEqual(matrix.count("mode: cargo"), 8)
         self.assertIn("inputs.cli_version", matrix)
         self.assertIn("Action default", matrix)
+        self.assertIn("./scripts/install-zed-toolchain.sh", rolling)
+        self.assertEqual(
+            rolling.count(
+                "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+            ),
+            1,
+        )
+        self.assertEqual(rolling.count('python-version: "3.12"'), 1)
         self.assertEqual(
             matrix.count(
                 "uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
