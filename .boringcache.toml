@@ -24,6 +24,7 @@ no-git = true
 metadata-hints = ["benchmark=zed", "lane=rolling", "layer=compiler"]
 
 [adapters.cargo]
+tag = "zed-cargo-rolling-main-cargo"
 profiles = ["cargo-product"]
 compiler-cache = "sccache"
 no-git = true

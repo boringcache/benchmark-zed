@@ -11,6 +11,7 @@ fi
 
 config_path="${repo_root}/.boringcache.toml"
 for tag_mapping in \
+  "zed-cargo-rolling-main-cargo:${scope}-cargo" \
   "zed-sccache-local:${scope}-sccache" \
   "zed-cargo-registry-local:${scope}-cargo-registry" \
   "zed-cargo-git-local:${scope}-cargo-git" \
