@@ -30,10 +30,27 @@ sudo apt-get install -y \
   libglib2.0-dev libssl-dev pkg-config cmake \
   libx11-dev libx11-xcb-dev libxcb1-dev \
   libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
-  musl-tools clang
+  musl-tools clang curl ca-certificates
 
 pinned="$(sed -n 's/^channel = "\(.*\)"$/\1/p' upstream/rust-toolchain.toml)"
 test -n "${pinned}"
+
+if ! command -v rustup >/dev/null 2>&1; then
+  rustup_init="$(mktemp)"
+  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL \
+    https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+    -o "${rustup_init}"
+  echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  ${rustup_init}" \
+    | sha256sum -c -
+  chmod +x "${rustup_init}"
+  "${rustup_init}" -y --default-toolchain "${pinned}" --profile minimal --no-modify-path
+  rm "${rustup_init}"
+
+  cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+  export PATH="${cargo_bin}:${PATH}"
+  echo "${cargo_bin}" >> "${GITHUB_PATH:-/dev/null}"
+fi
+
 (cd upstream && rustup show active-toolchain)
 rustup target add --toolchain "${pinned}" x86_64-unknown-linux-musl
 
