@@ -83,7 +83,7 @@ jobs:
 
       - name: Build the primary seed through the combined Cargo plan
         id: primary
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -103,7 +103,7 @@ jobs:
 
       - name: Build the remote server seed through the combined Cargo plan
         id: remote
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -158,7 +158,7 @@ jobs:
 
       - name: Build primary with the target-only Cargo plan
         id: primary
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -178,7 +178,7 @@ jobs:
 
       - name: Build remote server with the target-only Cargo plan
         id: remote
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -234,7 +234,7 @@ jobs:
 
       - name: Build primary with the sccache-only Cargo plan
         id: primary
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -254,7 +254,7 @@ jobs:
 
       - name: Build remote server with the sccache-only Cargo plan
         id: remote
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -309,7 +309,7 @@ jobs:
 
       - name: Build primary with the combined Cargo plan
         id: primary
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none
@@ -329,7 +329,7 @@ jobs:
 
       - name: Build remote server with the combined Cargo plan
         id: remote
-        uses: boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868 # v1 / 1.19.7
+        uses: boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c # v1 / 1.20.0
         with:
           cli-version: ${{ inputs.cli_version }}
           setup: none

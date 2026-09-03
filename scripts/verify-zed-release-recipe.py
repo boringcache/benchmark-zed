@@ -194,7 +194,7 @@ def verify_workflows() -> None:
         "The layer matrix must not follow the moving rolling source",
     )
     require(
-        "boringcache/one@aac19c43035c9d77cfc2573f663d35ea3fce2868" in matrix,
+        "boringcache/one@20202f4c4b789cdee581ae3f117dfafb8293b19c" in matrix,
         "The matrix must use released One 1.19.7",
     )
     for lane in LANES:
