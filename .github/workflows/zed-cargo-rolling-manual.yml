@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       source_distance:
-        description: Number of first-parent commits from base to head.
+        description: Number of first-parent commits from base to head; use 0 to replay the published source.
         required: false
         type: string
         default: "1"

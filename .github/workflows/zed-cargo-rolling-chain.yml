@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       source_distance:
-        description: Number of first-parent commits from the published seed to the selected source.
+        description: Number of first-parent commits from the published seed to the selected source; 0 replays it manually.
         required: false
         type: string
         default: "1"
@@ -89,7 +89,7 @@ jobs:
           git submodule sync --recursive
           git -c protocol.version=2 submodule update --init --depth 2 --recommend-shallow --jobs 4 upstream
           test "$(git -C upstream rev-parse HEAD)" = "$RESOLVED_BASE_SHA"
-          if [[ ! "$RESOLVED_SOURCE_DISTANCE" =~ ^[1-9][0-9]*$ ]]; then
+          if [[ ! "$RESOLVED_SOURCE_DISTANCE" =~ ^[0-9]+$ ]]; then
             echo "Invalid source distance: $RESOLVED_SOURCE_DISTANCE" >&2
             exit 1
           fi

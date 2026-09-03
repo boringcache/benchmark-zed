@@ -165,6 +165,8 @@ class SourceSyncTest(unittest.TestCase):
         self.assertNotIn("workflow_dispatch:", rolling)
         self.assertNotIn("push:", rolling)
         self.assertIn('test "$INPUT_BASE_SHA" = "$ZED_HEAD_SHA"', rolling)
+        self.assertIn('=~ ^[0-9]+$', rolling)
+        self.assertIn("use 0 to replay the published source", manual)
         self.assertIn(
             "advance-source-pair.sh benchmark-source.env ZED check_dependencies",
             sync,
