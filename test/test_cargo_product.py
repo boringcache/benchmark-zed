@@ -214,7 +214,7 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertEqual(matrix.count("mode: cargo"), 8)
         self.assertEqual(
             workflow_text.count(
-                "boringcache/one@4d152565a19570e669c54269f537ad2394bf1fe5"
+                "boringcache/one@c62af42c5c1e29388ceeea77b6a7f1db51f641e7"
             ),
             9,
         )
