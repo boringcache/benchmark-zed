@@ -195,7 +195,7 @@ def verify_workflows() -> None:
         "source cargo-layer-source.env" in matrix,
         "The layer matrix must not follow the moving rolling source",
     )
-    stable_action = "boringcache/one@c62af42c5c1e29388ceeea77b6a7f1db51f641e7"
+    stable_action = "boringcache/one@90111526eb218a7f1e119ac2b29f765bd4d82734"
     require(
         all_workflows.count(stable_action) == 9,
         "Every Cargo lane must use released One 1.20.1",
