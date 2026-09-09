@@ -19,6 +19,71 @@ LANES = {
 
 
 class SourceSyncTest(unittest.TestCase):
+    def test_required_check_is_resolved_across_all_pages(self):
+        current = "a" * 40
+        following = "b" * 40
+        for conclusion in ("success", "failure", None, "missing"):
+            for page_index in (0, 1):
+                with self.subTest(conclusion=conclusion, page=page_index):
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        source = root / "benchmark-source.env"
+                        original = (
+                            "ZED_SOURCE_REPOSITORY=zed-industries/zed\n"
+                            f"ZED_BASE_SHA={'0' * 40}\n"
+                            f"ZED_HEAD_SHA={current}\n"
+                        )
+                        source.write_text(original)
+                        pages = [{"check_runs": []}, {"check_runs": []}]
+                        if conclusion != "missing":
+                            pages[page_index]["check_runs"].append({
+                                "name": "check_dependencies",
+                                "status": "in_progress" if conclusion is None else "completed",
+                                "conclusion": conclusion,
+                            })
+                        (root / "checks.jsonl").write_text(
+                            "\n".join(json.dumps(page) for page in pages) + "\n"
+                        )
+                        (root / "comparison.json").write_text(json.dumps({
+                            "status": "ahead",
+                            "commits": [{"sha": following, "parents": [{"sha": current}]}],
+                        }))
+                        gh = root / "gh"
+                        gh.write_text(
+                            "#!/usr/bin/env bash\n"
+                            "case \"$*\" in\n"
+                            "  'api repos/zed-industries/zed --jq .default_branch') echo main ;;\n"
+                            f"  'api repos/zed-industries/zed/compare/{current}...main') "
+                            f"cat '{root}/comparison.json' ;;\n"
+                            "  *check-runs*)\n"
+                            "    if [[ \" $* \" == *' --paginate '* ]]; then\n"
+                            f"      cat '{root}/checks.jsonl'\n"
+                            "    else\n"
+                            f"      head -n 1 '{root}/checks.jsonl'\n"
+                            "    fi ;;\n"
+                            "  *) echo \"Unexpected gh call: $*\" >&2; exit 1 ;;\n"
+                            "esac\n"
+                        )
+                        gh.chmod(0o755)
+                        output = root / "github-output"
+                        result = subprocess.run(
+                            [str(ROOT / "scripts/advance-source-pair.sh"),
+                             str(source), "ZED", "check_dependencies"],
+                            check=True, capture_output=True, text=True,
+                            env={**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                                 "GITHUB_OUTPUT": str(output)},
+                        )
+                        if conclusion == "success":
+                            self.assertIn(f"ZED_HEAD_SHA={following}\n", source.read_text())
+                            self.assertIn("updated=true\n", output.read_text())
+                        else:
+                            self.assertEqual(source.read_text(), original)
+                            self.assertEqual(output.read_text(), "updated=false\n")
+                            self.assertNotIn("No upstream changes", result.stdout)
+                            expected = ("did not pass" if conclusion == "failure" else
+                                        "is pending" if conclusion is None else "is missing")
+                            self.assertIn(expected, result.stdout)
+
     def test_skips_sources_without_a_successful_required_check(self):
         current = "a" * 40
         failed = "b" * 40
@@ -52,11 +117,11 @@ class SourceSyncTest(unittest.TestCase):
                 "  'api repos/zed-industries/zed --jq .default_branch') echo main ;;\n"
                 f"  'api repos/zed-industries/zed/compare/{current}...main') "
                 f"echo '{comparison}' ;;\n"
-                f"  'api repos/zed-industries/zed/commits/{failed}/check-runs?filter=latest&per_page=100') "
+                f"  'api --paginate repos/zed-industries/zed/commits/{failed}/check-runs?filter=latest&per_page=100') "
                 "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"completed\",\"conclusion\":\"failure\"}]}' ;;\n"
-                f"  'api repos/zed-industries/zed/commits/{skipped}/check-runs?filter=latest&per_page=100') "
+                f"  'api --paginate repos/zed-industries/zed/commits/{skipped}/check-runs?filter=latest&per_page=100') "
                 "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"completed\",\"conclusion\":\"skipped\"}]}' ;;\n"
-                f"  'api repos/zed-industries/zed/commits/{following}/check-runs?filter=latest&per_page=100') "
+                f"  'api --paginate repos/zed-industries/zed/commits/{following}/check-runs?filter=latest&per_page=100') "
                 "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"completed\",\"conclusion\":\"success\"}]}' ;;\n"
                 "  *) echo \"Unexpected gh call: $*\" >&2; exit 1 ;;\n"
                 "esac\n"
@@ -122,7 +187,7 @@ class SourceSyncTest(unittest.TestCase):
                 "  'api repos/zed-industries/zed --jq .default_branch') echo main ;;\n"
                 f"  'api repos/zed-industries/zed/compare/{current}...main') "
                 f"echo '{comparison}' ;;\n"
-                f"  'api repos/zed-industries/zed/commits/{pending}/check-runs?filter=latest&per_page=100') "
+                f"  'api --paginate repos/zed-industries/zed/commits/{pending}/check-runs?filter=latest&per_page=100') "
                 "echo '{\"check_runs\":[{\"name\":\"check_dependencies\",\"status\":\"in_progress\",\"conclusion\":null}]}' ;;\n"
                 "  *) echo \"Unexpected gh call: $*\" >&2; exit 1 ;;\n"
                 "esac\n"

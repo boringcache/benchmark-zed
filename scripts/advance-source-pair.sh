@@ -44,17 +44,17 @@ required_check_status() {
   local commit="$1"
   local check_runs
 
-  check_runs="$(gh api "repos/${source_repository}/commits/${commit}/check-runs?filter=latest&per_page=100")"
-  if jq -e --arg name "$required_check" \
-    'any(.check_runs[]; .name == $name and .conclusion == "success")' \
+  check_runs="$(gh api --paginate "repos/${source_repository}/commits/${commit}/check-runs?filter=latest&per_page=100")"
+  if jq -se --arg name "$required_check" \
+    'any(.[].check_runs[]; .name == $name and .conclusion == "success")' \
     <<<"$check_runs" >/dev/null; then
     printf 'success'
-  elif jq -e --arg name "$required_check" \
-    'any(.check_runs[]; .name == $name and .status != "completed")' \
+  elif jq -se --arg name "$required_check" \
+    'any(.[].check_runs[]; .name == $name and .status != "completed")' \
     <<<"$check_runs" >/dev/null; then
     printf 'pending'
-  elif jq -e --arg name "$required_check" \
-    'any(.check_runs[]; .name == $name)' \
+  elif jq -se --arg name "$required_check" \
+    'any(.[].check_runs[]; .name == $name)' \
     <<<"$check_runs" >/dev/null; then
     printf 'failed'
   else
@@ -102,7 +102,11 @@ if [[ -z "$next_head" ]]; then
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "updated=false" >> "$GITHUB_OUTPUT"
   fi
-  echo "No upstream changes"
+  if [[ "$comparison_status" == "identical" ]]; then
+    echo "No upstream changes"
+  else
+    echo "No source selected; upstream commits remain"
+  fi
   exit 0
 fi
 
