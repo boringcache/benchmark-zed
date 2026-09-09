@@ -10,8 +10,16 @@ cd "${repo_root}"
 
 test -f upstream/rust-toolchain.toml
 
-sudo apt-get update
-sudo apt-get install -y \
+# Zed needs Ubuntu packages. Unrelated runner repositories can publish broken
+# indexes, so use the Ubuntu source list for both update and install.
+ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+test -s "$ubuntu_sources"
+apt_options=(
+  -o "Dir::Etc::sourcelist=$ubuntu_sources"
+  -o Dir::Etc::sourceparts=-
+)
+sudo apt-get "${apt_options[@]}" update --error-on=any
+sudo apt-get "${apt_options[@]}" install -y \
   libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
   libasound2-dev libfontconfig1-dev libfreetype6-dev \
   libglib2.0-dev libssl-dev pkg-config cmake \
