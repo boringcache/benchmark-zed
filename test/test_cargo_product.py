@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -277,12 +278,9 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertNotIn("fail-on-cache-miss", matrix)
         self.assertNotIn("cache_scope:", rolling)
         self.assertEqual(matrix.count("mode: cargo"), 8)
-        self.assertEqual(
-            workflow_text.count(
-                "boringcache/one@90111526eb218a7f1e119ac2b29f765bd4d82734"
-            ),
-            9,
-        )
+        action_refs = re.findall(r"boringcache/one@([0-9a-f]{40})", workflow_text)
+        self.assertEqual(len(action_refs), 9)
+        self.assertEqual(len(set(action_refs)), 1)
         self.assertIn("inputs.cli_version", matrix)
         self.assertIn("Action default", matrix)
         self.assertIn("./scripts/install-zed-toolchain.sh", rolling)

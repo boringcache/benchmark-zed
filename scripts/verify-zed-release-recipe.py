@@ -195,10 +195,10 @@ def verify_workflows() -> None:
         "source cargo-layer-source.env" in matrix,
         "The layer matrix must not follow the moving rolling source",
     )
-    stable_action = "boringcache/one@90111526eb218a7f1e119ac2b29f765bd4d82734"
+    action_refs = re.findall(r"boringcache/one@([0-9a-f]{40})", all_workflows)
     require(
-        all_workflows.count(stable_action) == 9,
-        "Every Cargo lane must use released One 1.20.1",
+        len(action_refs) == 9 and len(set(action_refs)) == 1,
+        "Every Cargo lane must use the same reviewed One action ref",
     )
     require(
         all_workflows.count("CXX: clang++") == 2,
