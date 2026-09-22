@@ -156,6 +156,9 @@ jobs:
           BUILD_SECONDS: ${{ steps.build_timing.outputs.build_seconds }}
           CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
           EVIDENCE_PATH: ${{ steps.cache.outputs.evidence-path }}
+          STORAGE_KEY: ${{ steps.scope.outputs.cache_key }}
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           SOURCE_REPOSITORY: ${{ needs.source.outputs.source_repository }}
           SOURCE_SHA: ${{ env.RESOLVED_HEAD_SHA }}
         run: |
@@ -171,6 +174,7 @@ jobs:
             --cache-hit "$CACHE_HIT" \
             --source-repository "$SOURCE_REPOSITORY" \
             --source-sha "$SOURCE_SHA" \
+            --storage-key "$STORAGE_KEY" \
             --evidence "$EVIDENCE_PATH"
       
       - name: Publish the Zed Cargo rolling benchmark report
