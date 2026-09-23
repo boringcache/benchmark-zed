@@ -26,7 +26,8 @@ jobs:
       base_sha: ${{ steps.source.outputs.base_sha }}
       head_sha: ${{ steps.source.outputs.head_sha }}
       source_distance: ${{ steps.source.outputs.source_distance }}
-      skipped_source_count: ${{ steps.source.outputs.skipped_source_count }}
+      intermediate_source_count: ${{ steps.source.outputs.intermediate_source_count }}
+      deferred_source_count: ${{ steps.source.outputs.deferred_source_count }}
     steps:
       - name: Checkout benchmark repo
         uses: actions/checkout@v6
@@ -36,7 +37,7 @@ jobs:
           submodules: false
           token: ${{ github.token }}
 
-      - name: Select the next dependency-verified source
+      - name: Select the newest dependency-verified source
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,14 +49,16 @@ jobs:
           BASE_SHA: ${{ steps.source.outputs.base_sha }}
           HEAD_SHA: ${{ steps.source.outputs.head_sha }}
           SOURCE_DISTANCE: ${{ steps.source.outputs.source_distance }}
-          SKIPPED_SOURCE_COUNT: ${{ steps.source.outputs.skipped_source_count }}
+          INTERMEDIATE_SOURCE_COUNT: ${{ steps.source.outputs.intermediate_source_count }}
+          DEFERRED_SOURCE_COUNT: ${{ steps.source.outputs.deferred_source_count }}
         run: |
           {
             echo "## Zed source selection"
             echo
             echo "- Source: \`${BASE_SHA}\` → \`${HEAD_SHA}\`"
             echo "- Commit distance: \`${SOURCE_DISTANCE}\`"
-            echo "- Commits without a successful upstream dependency check: \`${SKIPPED_SOURCE_COUNT}\`"
+            echo "- Intermediate commits included in this build: \`${INTERMEDIATE_SOURCE_COUNT}\`"
+            echo "- Newer commits awaiting a successful dependency check: \`${DEFERRED_SOURCE_COUNT}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   benchmark:
@@ -92,7 +95,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ./scripts/advance-source-pair.sh benchmark-source.env ZED check_dependencies
+          ./scripts/advance-source-pair.sh benchmark-source.env ZED check_dependencies "$EXPECTED_HEAD_SHA"
           source benchmark-source.env
           test "$ZED_BASE_SHA" = "$EXPECTED_BASE_SHA"
           test "$ZED_HEAD_SHA" = "$EXPECTED_HEAD_SHA"

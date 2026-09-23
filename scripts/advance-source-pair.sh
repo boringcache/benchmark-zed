@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-env_file="${1:?usage: advance-source-pair.sh ENV_FILE PREFIX [REQUIRED_CHECK]}"
-prefix="${2:?usage: advance-source-pair.sh ENV_FILE PREFIX [REQUIRED_CHECK]}"
+env_file="${1:?usage: advance-source-pair.sh ENV_FILE PREFIX [REQUIRED_CHECK] [EXPECTED_HEAD]}"
+prefix="${2:?usage: advance-source-pair.sh ENV_FILE PREFIX [REQUIRED_CHECK] [EXPECTED_HEAD]}"
 required_check="${3:-}"
+# Older in-flight publish jobs pass the selected head through the environment.
+expected_head="${4:-${EXPECTED_HEAD_SHA:-}}"
 
 if [[ ! "$prefix" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
   echo "Invalid source prefix: $prefix" >&2
@@ -24,7 +26,8 @@ setting() {
 source_repository="$(setting "${prefix}_SOURCE_REPOSITORY")"
 current_head="$(setting "${prefix}_HEAD_SHA")"
 default_branch="$(gh api "repos/${source_repository}" --jq .default_branch)"
-comparison="$(gh api "repos/${source_repository}/compare/${current_head}...${default_branch}")"
+comparison="$(gh api --paginate "repos/${source_repository}/compare/${current_head}...${default_branch}?per_page=100" |
+  jq -s '{status: .[0].status, commits: [.[].commits[]]}')"
 comparison_status="$(jq -r .status <<<"$comparison")"
 
 case "$comparison_status" in
@@ -62,9 +65,7 @@ required_check_status() {
   fi
 }
 
-source_distance=0
-skipped_source_count=0
-skipped_source_shas=""
+candidate_shas=()
 previous_source="$current_head"
 if [[ "$comparison_status" == "ahead" ]]; then
   while IFS=$'\t' read -r candidate candidate_parent; do
@@ -73,29 +74,37 @@ if [[ "$comparison_status" == "ahead" ]]; then
       exit 1
     fi
     previous_source="$candidate"
-    source_distance=$((source_distance + 1))
-    if [[ -z "$required_check" ]]; then
-      next_head="$candidate"
-      break
-    fi
-
-    check_status="$(required_check_status "$candidate")"
-    case "$check_status" in
-      success)
-        next_head="$candidate"
-        break
-        ;;
-      failed|missing)
-        skipped_source_count=$((skipped_source_count + 1))
-        skipped_source_shas="${skipped_source_shas:+${skipped_source_shas},}${candidate}"
-        echo "Skipping ${candidate}: upstream ${required_check} is ${check_status}"
-        ;;
-      pending)
-        echo "Waiting for ${candidate}: upstream ${required_check} is ${check_status}"
-        break
-        ;;
-    esac
+    candidate_shas+=("$candidate")
   done < <(jq -r '.commits[] | [.sha, (.parents[0].sha // "")] | @tsv' <<<"$comparison")
+fi
+
+source_distance=0
+deferred_source_count=0
+for ((index=${#candidate_shas[@]}-1; index>=0; index--)); do
+  candidate="${candidate_shas[$index]}"
+  if [[ -n "$expected_head" && "$candidate" != "$expected_head" ]]; then
+    continue
+  fi
+  if [[ -n "$required_check" ]]; then
+    check_status="$(required_check_status "$candidate")"
+    if [[ "$check_status" != "success" ]]; then
+      if [[ -n "$expected_head" ]]; then
+        echo "Expected ${candidate} to have a successful upstream ${required_check} check; got ${check_status}" >&2
+        exit 1
+      fi
+      deferred_source_count=$((deferred_source_count + 1))
+      echo "Deferring ${candidate}: upstream ${required_check} is ${check_status}"
+      continue
+    fi
+  fi
+  next_head="$candidate"
+  source_distance=$((index + 1))
+  break
+done
+
+if [[ -n "$expected_head" && "$next_head" != "$expected_head" ]]; then
+  echo "Expected head ${expected_head} is not ahead of ${current_head} on ${default_branch}" >&2
+  exit 1
 fi
 
 if [[ -z "$next_head" ]]; then
@@ -129,8 +138,8 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "base_sha=${current_head}"
     echo "head_sha=${next_head}"
     echo "source_distance=${source_distance}"
-    echo "skipped_source_count=${skipped_source_count}"
-    echo "skipped_source_shas=${skipped_source_shas}"
+    echo "intermediate_source_count=$((source_distance - 1))"
+    echo "deferred_source_count=${deferred_source_count}"
   } >> "$GITHUB_OUTPUT"
 fi
 
