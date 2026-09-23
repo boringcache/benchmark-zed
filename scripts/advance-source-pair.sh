@@ -85,12 +85,12 @@ if [[ "$comparison_status" == "ahead" ]]; then
         next_head="$candidate"
         break
         ;;
-      failed)
+      failed|missing)
         skipped_source_count=$((skipped_source_count + 1))
         skipped_source_shas="${skipped_source_shas:+${skipped_source_shas},}${candidate}"
-        echo "Skipping ${candidate}: upstream ${required_check} did not pass"
+        echo "Skipping ${candidate}: upstream ${required_check} is ${check_status}"
         ;;
-      pending|missing)
+      pending)
         echo "Waiting for ${candidate}: upstream ${required_check} is ${check_status}"
         break
         ;;
