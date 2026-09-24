@@ -22,11 +22,12 @@ The root [`.boringcache.toml`](.boringcache.toml) owns the persistent rolling
 chain. [`.github/workflows/zed-cargo-product.yml`](.github/workflows/zed-cargo-product.yml)
 owns the independent release matrix.
 
-The scheduled rolling chain selects the first source with a successful upstream
-`check_dependencies` result, benchmarks and publishes it, and only then advances
-`benchmark-source.env` on `main`. Commits with broken dependency state are
+The scheduled sync selects the newest source with a successful upstream
+`check_dependencies` result and dispatches a separate rolling run. That run
+benchmarks and publishes the source, then advances `benchmark-source.env` on
+`main` only after the build succeeds. Commits with broken dependency state are
 skipped as source points, while the build still starts from the last published
 cache seed and records the exact commit distance. The rolling build executes
-Cargo directly, as required by BoringCache's Cargo adapter. Scheduled and manual
-rolling runs share one concurrency group; queued schedule ticks may collapse,
-but the source pin cannot advance past an unbuilt commit.
+Cargo directly, as required by BoringCache's Cargo adapter. Sync, scheduled
+rolling, and manual rolling runs share one concurrency group; queued schedule
+ticks may collapse, but the source pin cannot advance past an unbuilt commit.

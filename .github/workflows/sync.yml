@@ -6,14 +6,13 @@ on:
     - cron: "28,58 * * * *"
 
 permissions:
-  actions: read
+  actions: write
   checks: read
-  contents: write
+  contents: read
 
 concurrency:
-  # Keep source selection, the rolling build, and the source-pin commit in one
-  # serialized run. GitHub only retains one pending run per concurrency group,
-  # so no source state may advance before the running benchmark succeeds.
+  # Serialize source selection with the dispatched build. The build advances
+  # the source pin only after it succeeds.
   group: benchmark-zed-cargo-rolling-chain
   cancel-in-progress: false
 
@@ -61,61 +60,23 @@ jobs:
             echo "- Newer commits awaiting a successful dependency check: \`${DEFERRED_SOURCE_COUNT}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  benchmark:
-    name: Benchmark the next dependency-verified Zed source
+  dispatch:
+    name: Dispatch the next dependency-verified Zed source
     needs: source
     if: needs.source.outputs.updated == 'true'
-    uses: ./.github/workflows/zed-cargo-rolling-chain.yml
-    with:
-      base_sha: ${{ needs.source.outputs.base_sha }}
-      head_sha: ${{ needs.source.outputs.head_sha }}
-      source_distance: ${{ needs.source.outputs.source_distance }}
-    secrets: inherit
-
-  publish-source:
-    name: Publish the verified Zed source
-    needs: [source, benchmark]
-    if: needs.source.outputs.updated == 'true' && needs.benchmark.result == 'success'
     runs-on: ubuntu-24.04
     env:
-      EXPECTED_BASE_SHA: ${{ needs.source.outputs.base_sha }}
-      EXPECTED_HEAD_SHA: ${{ needs.source.outputs.head_sha }}
+      GH_TOKEN: ${{ github.token }}
+      BASE_SHA: ${{ needs.source.outputs.base_sha }}
+      HEAD_SHA: ${{ needs.source.outputs.head_sha }}
+      SOURCE_DISTANCE: ${{ needs.source.outputs.source_distance }}
     steps:
-      - name: Checkout benchmark repo
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: main
-          submodules: false
-          token: ${{ github.token }}
-
-      - name: Advance the verified source pair
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Dispatch the rolling build
         run: |
           set -euo pipefail
-          ./scripts/advance-source-pair.sh benchmark-source.env ZED check_dependencies "$EXPECTED_HEAD_SHA"
-          source benchmark-source.env
-          test "$ZED_BASE_SHA" = "$EXPECTED_BASE_SHA"
-          test "$ZED_HEAD_SHA" = "$EXPECTED_HEAD_SHA"
-
-      - name: Pin the verified Zed head
-        run: |
-          set -euo pipefail
-          source benchmark-source.env
-          git submodule sync --recursive
-          git submodule update --init --checkout upstream
-          git -C upstream fetch --no-tags --depth 1 origin "$ZED_HEAD_SHA"
-          git -C upstream checkout --detach "$ZED_HEAD_SHA"
-          test "$(git -C upstream rev-parse HEAD)" = "$ZED_HEAD_SHA"
-
-      - name: Commit the verified upstream update
-        run: |
-          set -euo pipefail
-          git config user.name "boringcache-bot"
-          git config user.email "boringcache-bot@users.noreply.github.com"
-          git add benchmark-source.env upstream
-          test -n "$(git diff --cached --name-only)"
-          git commit -m "Update upstream to ${{ steps.source.outputs.source_repository }}@${{ steps.source.outputs.source_short_sha }}"
-          git push origin HEAD:main
+          gh workflow run zed-cargo-rolling-auto.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "base_sha=${BASE_SHA}" \
+            -f "head_sha=${HEAD_SHA}" \
+            -f "source_distance=${SOURCE_DISTANCE}"
