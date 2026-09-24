@@ -67,7 +67,7 @@ jobs:
   advance:
     name: BoringCache Zed Cargo commit
     needs: source
-    runs-on: ${{ inputs.runner_label || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
     timeout-minutes: 240
     env:
       RESOLVED_BASE_SHA: ${{ inputs.base_sha }}
