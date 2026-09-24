@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' .boringcache.toml
           find plans -name .boringcache.toml -exec sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' {} +
-          test "$(rg -l '^workspace = "boringcache/benchmark-runs-on-s3"$' plans --hidden -g .boringcache.toml | wc -l)" -eq 8
+          test "$(find plans -name .boringcache.toml -exec grep -lFx 'workspace = "boringcache/benchmark-runs-on-s3"' {} + | wc -l)" -eq 8
 
       - name: Select the reviewed source pair
         id: source
@@ -67,7 +67,7 @@ jobs:
     name: "Cold: target + sccache seed"
     needs: source
     if: github.ref_name == 'main'
-    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1
+    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1/spot=false
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -76,7 +76,7 @@ jobs:
           set -euo pipefail
           sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' .boringcache.toml
           find plans -name .boringcache.toml -exec sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' {} +
-          test "$(rg -l '^workspace = "boringcache/benchmark-runs-on-s3"$' plans --hidden -g .boringcache.toml | wc -l)" -eq 8
+          test "$(find plans -name .boringcache.toml -exec grep -lFx 'workspace = "boringcache/benchmark-runs-on-s3"' {} + | wc -l)" -eq 8
 
       - name: Use the benchmark Python toolchain
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -150,7 +150,7 @@ jobs:
   target-only:
     name: "Target only: compiler cache disabled"
     needs: [source, cold]
-    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1
+    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1/spot=false
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -159,7 +159,7 @@ jobs:
           set -euo pipefail
           sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' .boringcache.toml
           find plans -name .boringcache.toml -exec sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' {} +
-          test "$(rg -l '^workspace = "boringcache/benchmark-runs-on-s3"$' plans --hidden -g .boringcache.toml | wc -l)" -eq 8
+          test "$(find plans -name .boringcache.toml -exec grep -lFx 'workspace = "boringcache/benchmark-runs-on-s3"' {} + | wc -l)" -eq 8
 
       - name: Use the benchmark Python toolchain
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -229,7 +229,7 @@ jobs:
   sccache-only:
     name: "sccache only: target excluded"
     needs: [source, cold]
-    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1
+    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1/spot=false
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -238,7 +238,7 @@ jobs:
           set -euo pipefail
           sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' .boringcache.toml
           find plans -name .boringcache.toml -exec sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' {} +
-          test "$(rg -l '^workspace = "boringcache/benchmark-runs-on-s3"$' plans --hidden -g .boringcache.toml | wc -l)" -eq 8
+          test "$(find plans -name .boringcache.toml -exec grep -lFx 'workspace = "boringcache/benchmark-runs-on-s3"' {} + | wc -l)" -eq 8
 
       - name: Use the benchmark Python toolchain
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -312,7 +312,7 @@ jobs:
   combined:
     name: "Combined: target + sccache"
     needs: [source, cold]
-    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1
+    runs-on: runs-on=${{ github.run_id }}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1/spot=false
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -321,7 +321,7 @@ jobs:
           set -euo pipefail
           sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' .boringcache.toml
           find plans -name .boringcache.toml -exec sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' {} +
-          test "$(rg -l '^workspace = "boringcache/benchmark-runs-on-s3"$' plans --hidden -g .boringcache.toml | wc -l)" -eq 8
+          test "$(find plans -name .boringcache.toml -exec grep -lFx 'workspace = "boringcache/benchmark-runs-on-s3"' {} + | wc -l)" -eq 8
 
       - name: Use the benchmark Python toolchain
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -405,7 +405,7 @@ jobs:
           set -euo pipefail
           sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' .boringcache.toml
           find plans -name .boringcache.toml -exec sed -i 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' {} +
-          test "$(rg -l '^workspace = "boringcache/benchmark-runs-on-s3"$' plans --hidden -g .boringcache.toml | wc -l)" -eq 8
+          test "$(find plans -name .boringcache.toml -exec grep -lFx 'workspace = "boringcache/benchmark-runs-on-s3"' {} + | wc -l)" -eq 8
 
       - name: Download every lane's product evidence
         uses: actions/download-artifact@v6
