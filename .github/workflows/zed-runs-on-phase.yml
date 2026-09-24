@@ -20,6 +20,14 @@ on:
         required: false
         type: string
         default: ""
+      rolling_step:
+        required: false
+        type: string
+        default: ""
+      rolling_previous:
+        required: false
+        type: string
+        default: ""
       cli_version:
         required: false
         type: string
@@ -66,6 +74,7 @@ jobs:
       - name: Select the same Cargo command and a fresh cache cohort
         env:
           CACHE_VARIANT: ${{ inputs.cache_variant }}
+          ROLLING_STEP: ${{ inputs.rolling_step }}
         run: |
           set -euo pipefail
           case "$CACHE_VARIANT" in
@@ -75,8 +84,13 @@ jobs:
             *) echo "Unknown cache variant: $CACHE_VARIANT" >&2; exit 1 ;;
           esac
           ./scripts/activate-cargo-plan.sh "$plan" primary
+          scope="zed-runson-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+          if [[ -n "$ROLLING_STEP" ]]; then
+            test "$CACHE_VARIANT" = target
+            scope="zed-roll11-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+          fi
           sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3-clean"|' "plans/$plan/primary/.boringcache.toml" |
-            sed "s|tag = \"|tag = \"zed-runson-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT-|g" > "$RUNNER_TEMP/zed-plan.toml"
+            sed "s|tag = \"|tag = \"$scope-|g" > "$RUNNER_TEMP/zed-plan.toml"
           rm upstream/.boringcache.toml
           cp "$RUNNER_TEMP/zed-plan.toml" upstream/.boringcache.toml
           test ! -e upstream/target
@@ -84,6 +98,26 @@ jobs:
       - name: Start the cache and build timer
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Name Magic Cache keys
+        id: magic_keys
+        env:
+          CACHE_VARIANT: ${{ inputs.cache_variant }}
+          PHASE: ${{ inputs.phase }}
+          ROLLING_STEP: ${{ inputs.rolling_step }}
+          ROLLING_PREVIOUS: ${{ inputs.rolling_previous }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ROLLING_STEP" ]]; then
+            prefix="zed-magic-roll11-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+            echo "restore=$prefix-step$ROLLING_PREVIOUS" >> "$GITHUB_OUTPUT"
+            echo "save=$prefix-step$ROLLING_STEP" >> "$GITHUB_OUTPUT"
+          else
+            prefix="zed-magic-$CACHE_VARIANT-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+            previous=warm
+            [[ "$PHASE" != warm ]] || previous=cold
+            echo "restore=$prefix-$previous" >> "$GITHUB_OUTPUT"
+            echo "save=$prefix-$PHASE" >> "$GITHUB_OUTPUT"
+          fi
       - name: Restore RunsOn Magic Cache
         id: magic_restore
         if: inputs.provider == 'runs-on-cache' && inputs.phase != 'cold' && inputs.cache_variant != 'sccache-only'
@@ -94,7 +128,7 @@ jobs:
             ~/.cargo/git
             upstream/target
             sccache-cache
-          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
+          key: ${{ steps.magic_keys.outputs.restore }}
           fail-on-cache-miss: true
       - name: Restore RunsOn Magic compiler cache
         id: magic_compiler_restore
@@ -105,7 +139,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             sccache-cache
-          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
+          key: ${{ steps.magic_keys.outputs.restore }}
           fail-on-cache-miss: true
       - name: Record cache setup time
         id: setup_timer
@@ -150,7 +184,7 @@ jobs:
             ~/.cargo/git
             upstream/target
             sccache-cache
-          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
+          key: ${{ steps.magic_keys.outputs.save }}
       - name: Save RunsOn Magic compiler cache
         if: inputs.provider == 'runs-on-cache' && inputs.cache_variant == 'sccache-only'
         uses: actions/cache/save@v4
@@ -159,7 +193,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             sccache-cache
-          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
+          key: ${{ steps.magic_keys.outputs.save }}
       - name: Verify release binary and cache reuse
         env:
           PROVIDER: ${{ inputs.provider }}
@@ -179,8 +213,9 @@ jobs:
       - name: Write phase evidence
         env:
           PROVIDER: ${{ inputs.provider }}
-          PHASE: ${{ inputs.phase }}
-          LANE: ${{ inputs.cache_variant == 'target' && 'fresh' || inputs.cache_variant }}
+          PHASE: ${{ inputs.rolling_step != '' && 'commit' || inputs.phase }}
+          LANE: ${{ inputs.rolling_step != '' && 'rolling' || (inputs.cache_variant == 'target' && 'fresh' || inputs.cache_variant) }}
+          VARIANT: ${{ inputs.rolling_step != '' && format('step{0}{1}', inputs.rolling_step, inputs.phase == 'warm' && '-warm' || '') || '' }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           STARTED_AT: ${{ steps.timer.outputs.started_at }}
           WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
@@ -195,6 +230,7 @@ jobs:
             --strategy "$PROVIDER" \
             --lane "$LANE" \
             --phase "$PHASE" \
+            --variant "$VARIANT" \
             --mode cargo \
             --restore-or-setup-seconds "$SETUP_SECONDS" \
             --build-seconds "$(( $(date +%s) - STARTED_AT - SETUP_SECONDS ))" \
@@ -205,6 +241,6 @@ jobs:
             --evidence "$EVIDENCE_PATH"
       - uses: actions/upload-artifact@v6
         with:
-          name: phase-zed-runson-${{ inputs.provider }}-${{ inputs.phase }}
+          name: phase-zed-runson-${{ inputs.provider }}-${{ inputs.rolling_step != '' && format('step{0}', inputs.rolling_step) || inputs.phase }}
           path: benchmark-results/
           if-no-files-found: error

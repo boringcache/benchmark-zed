@@ -1,0 +1,251 @@
+name: Zed RunsOn 10-commit rolling comparison
+run-name: Zed 10 commits and final same-revision warm run
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: Optional exact BoringCache CLI release tag.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: zed-runs-on-rolling11
+  cancel-in-progress: false
+
+jobs:
+  source:
+    name: Resolve ten first-parent source commits
+    runs-on: ubuntu-24.04
+    outputs:
+      shas: ${{ steps.commits.outputs.shas }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Pin the source sequence
+        id: commits
+        run: |
+          set -euo pipefail
+          source cargo-layer-source.env
+          head="$ZED_HEAD_SHA"
+          git init "$RUNNER_TEMP/source"
+          git -C "$RUNNER_TEMP/source" remote add origin https://github.com/zed-industries/zed.git
+          git -C "$RUNNER_TEMP/source" fetch --no-tags --filter=blob:none --depth=11 origin "$head"
+          mapfile -t shas < <(git -C "$RUNNER_TEMP/source" rev-list --first-parent --max-count=10 "$head" | tac)
+          test "${#shas[@]}" -eq 10
+          test "${shas[9]}" = "$head"
+          echo "shas=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${shas[@]}")" >> "$GITHUB_OUTPUT"
+          printf "%s\n" "${shas[@]}"
+
+  step00:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: cold
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[0] }}
+      rolling_step: "00"
+      cli_version: ${{ inputs.cli_version }}
+
+  step01:
+    needs: [source, step00]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[1] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[0] }}
+      rolling_step: "01"
+      rolling_previous: "00"
+      cli_version: ${{ inputs.cli_version }}
+
+  step02:
+    needs: [source, step01]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[2] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[1] }}
+      rolling_step: "02"
+      rolling_previous: "01"
+      cli_version: ${{ inputs.cli_version }}
+
+  step03:
+    needs: [source, step02]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[3] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[2] }}
+      rolling_step: "03"
+      rolling_previous: "02"
+      cli_version: ${{ inputs.cli_version }}
+
+  step04:
+    needs: [source, step03]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[4] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[3] }}
+      rolling_step: "04"
+      rolling_previous: "03"
+      cli_version: ${{ inputs.cli_version }}
+
+  step05:
+    needs: [source, step04]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[5] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[4] }}
+      rolling_step: "05"
+      rolling_previous: "04"
+      cli_version: ${{ inputs.cli_version }}
+
+  step06:
+    needs: [source, step05]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[6] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[5] }}
+      rolling_step: "06"
+      rolling_previous: "05"
+      cli_version: ${{ inputs.cli_version }}
+
+  step07:
+    needs: [source, step06]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[7] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[6] }}
+      rolling_step: "07"
+      rolling_previous: "06"
+      cli_version: ${{ inputs.cli_version }}
+
+  step08:
+    needs: [source, step07]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[8] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[7] }}
+      rolling_step: "08"
+      rolling_previous: "07"
+      cli_version: ${{ inputs.cli_version }}
+
+  step09:
+    needs: [source, step08]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: source_change
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[9] }}
+      expected_parent: ${{ fromJSON(needs.source.outputs.shas)[8] }}
+      rolling_step: "09"
+      rolling_previous: "08"
+      cli_version: ${{ inputs.cli_version }}
+
+  step10:
+    needs: [source, step09]
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [runs-on-cache, boringcache]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: ${{ matrix.provider }}
+      phase: warm
+      cache_variant: target
+      source_sha: ${{ fromJSON(needs.source.outputs.shas)[9] }}
+      rolling_step: "10"
+      rolling_previous: "09"
+      cli_version: ${{ inputs.cli_version }}
+
+  report:
+    name: Compare all eleven builds
+    needs: step10
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: phase-zed-runson-*-step*
+          path: phase-evidence
+      - name: Summarize the rolling sequence
+        run: |
+          python3 ./scripts/benchmark-report.py summarize \
+            --title "Zed 10-commit RunsOn rolling comparison" \
+            --baseline-strategy runs-on-cache \
+            --no-deltas \
+            --input-dir phase-evidence \
+            --output-dir benchmark-results
+      - uses: actions/upload-artifact@v6
+        with:
+          name: zed-runson-rolling11-comparison
+          path: benchmark-results/
+          if-no-files-found: error
