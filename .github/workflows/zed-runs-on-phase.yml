@@ -1,0 +1,161 @@
+name: Zed RunsOn cache phase
+
+on:
+  workflow_call:
+    inputs:
+      provider:
+        required: true
+        type: string
+      phase:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      expected_parent:
+        required: false
+        type: string
+        default: ""
+      cli_version:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+env:
+  CARGO_INCREMENTAL: "0"
+  ZED_BUNDLE: "true"
+  CC: clang
+  CXX: clang++
+  RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+  BORINGCACHE_TOKEN_FILE: /dev/null
+  BORINGCACHE_NO_GIT: "true"
+
+jobs:
+  build:
+    name: ${{ inputs.provider }} ${{ inputs.phase }}
+    runs-on: ${{ inputs.provider == 'runs-on-cache' && format('runs-on={0}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1/spot=false/extras=s3-cache', github.run_id) || format('runs-on={0}/cpu=16/ram=64/family=m7i.*+m7a/image=ubuntu24-full-x64/volume=300gb:gp3/env=benchmark/region=us-east-1/spot=false', github.run_id) }}
+    timeout-minutes: 240
+    steps:
+      - uses: runs-on/action@efac073ea2507ec18797de3a81704201ade11d9d # v2.3.1
+      - uses: actions/checkout@v6
+      - name: Start the workflow timer
+        id: workflow_timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Prepare the exact Zed source and toolchain
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_PARENT: ${{ inputs.expected_parent }}
+        run: ./scripts/prepare-zed-lane.sh "$SOURCE_SHA" "$EXPECTED_PARENT"
+      - name: Select the same Cargo command and a fresh cache cohort
+        run: |
+          set -euo pipefail
+          ./scripts/activate-cargo-plan.sh target-only primary
+          sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' plans/target-only/primary/.boringcache.toml |
+            sed "s|tag = \"|tag = \"zed-runson-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT-|g" > "$RUNNER_TEMP/zed-plan.toml"
+          rm upstream/.boringcache.toml
+          cp "$RUNNER_TEMP/zed-plan.toml" upstream/.boringcache.toml
+          test ! -e upstream/target
+          test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
+      - name: Start the cache and build timer
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Restore RunsOn Magic Cache
+        id: magic_restore
+        if: inputs.provider == 'runs-on-cache' && inputs.phase != 'cold'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            upstream/target
+          key: zed-magic-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
+          fail-on-cache-miss: true
+      - name: Record cache setup time
+        id: setup_timer
+        run: echo "seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_OUTPUT"
+      - name: Build with BoringCache
+        id: boringcache
+        if: inputs.provider == 'boringcache'
+        uses: boringcache/one@476c7df90bc1e7c2c4066aa7eb31cc057ef7f8d1 # v1 / 1.32.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          mode: cargo
+          trust-policy: publish
+          working-directory: upstream
+          fail-on-cache-error: true
+          diagnostics: summary
+      - name: Build with RunsOn Magic Cache
+        if: inputs.provider == 'runs-on-cache'
+        working-directory: upstream
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import tomllib
+          with open(".boringcache.toml", "rb") as source:
+              command = tomllib.load(source)["adapters"]["cargo"]["command"]
+          subprocess.run(command, check=True)
+          PY
+      - name: Save RunsOn Magic Cache
+        if: inputs.provider == 'runs-on-cache'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            upstream/target
+          key: zed-magic-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
+      - name: Verify release binary and cache reuse
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          PHASE: ${{ inputs.phase }}
+          MAGIC_HIT: ${{ steps.magic_restore.outputs.cache-hit }}
+          BORINGCACHE_HIT: ${{ steps.boringcache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          test -x upstream/target/x86_64-unknown-linux-gnu/release/zed
+          if [[ "$PHASE" != cold ]]; then
+            if [[ "$PROVIDER" == runs-on-cache ]]; then
+              test "$MAGIC_HIT" = true
+            else
+              test "$BORINGCACHE_HIT" = true
+            fi
+          fi
+      - name: Write phase evidence
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          PHASE: ${{ inputs.phase }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          STARTED_AT: ${{ steps.timer.outputs.started_at }}
+          WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
+          SETUP_SECONDS: ${{ inputs.provider == 'runs-on-cache' && steps.setup_timer.outputs.seconds || '0' }}
+          CACHE_HIT: ${{ inputs.provider == 'runs-on-cache' && steps.magic_restore.outputs.cache-hit || steps.boringcache.outputs.cache-hit }}
+          EVIDENCE_PATH: ${{ steps.boringcache.outputs.evidence-path }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 ./scripts/benchmark-report.py phase \
+            --benchmark zed-runson \
+            --strategy "$PROVIDER" \
+            --lane fresh \
+            --phase "$PHASE" \
+            --mode cargo \
+            --restore-or-setup-seconds "$SETUP_SECONDS" \
+            --build-seconds "$(( $(date +%s) - STARTED_AT - SETUP_SECONDS ))" \
+            --workflow-seconds "$(( $(date +%s) - WORKFLOW_STARTED_AT ))" \
+            --cache-hit "$CACHE_HIT" \
+            --source-repository zed-industries/zed \
+            --source-sha "$SOURCE_SHA" \
+            --evidence "$EVIDENCE_PATH"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: phase-zed-runson-${{ inputs.provider }}-${{ inputs.phase }}
+          path: benchmark-results/
+          if-no-files-found: error
