@@ -46,6 +46,8 @@ PHASE_LABELS = {
 
 LANE_PHASES = {
     "fresh": ("cold", "warm", "source_change"),
+    "target-sccache": ("cold", "warm", "source_change"),
+    "sccache-only": ("cold", "warm", "source_change"),
     "rolling": ("commit",),
 }
 
