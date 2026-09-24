@@ -95,6 +95,26 @@ jobs:
           cp "$RUNNER_TEMP/zed-plan.toml" upstream/.boringcache.toml
           test ! -e upstream/target
           test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
+      - name: Preserve restored target freshness
+        if: inputs.cache_variant != 'sccache-only'
+        env:
+          PHASE: ${{ inputs.phase }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_PARENT: ${{ inputs.expected_parent }}
+        run: |
+          set -euo pipefail
+          test ! -e upstream/target
+          find upstream -path 'upstream/.git' -prune -o -type f -exec touch -d '@946684800' {} +
+          if [[ "$PHASE" == source_change ]]; then
+            test -n "$EXPECTED_PARENT"
+            test "$(git -C upstream rev-parse HEAD)" = "$SOURCE_SHA"
+            test "$(git -C upstream rev-parse HEAD^)" = "$EXPECTED_PARENT"
+            while IFS= read -r -d '' changed; do
+              test -f "upstream/$changed"
+              touch "upstream/$changed"
+            done < <(git -C upstream diff --name-only -z "$EXPECTED_PARENT" "$SOURCE_SHA")
+          fi
+          test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
       - name: Start the cache and build timer
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
