@@ -24,6 +24,8 @@ owns the independent release matrix.
 
 The [RunsOn cache comparison](.github/workflows/zed-runs-on-cache.yml) builds the primary Linux release command on fresh 16 vCPU, 64 GiB Flex runners in `us-east-1`. RunsOn Magic Cache and BoringCache both cache Cargo registry, Git, and target data. Each provider builds the pinned base revision cold, rebuilds that revision on a fresh runner, then builds its adjacent revision on a third runner. Every phase writes a new cache snapshot and checks the release binary. Compare total cache and build time; the setup and build columns split work differently for the two providers. Inspect the Magic Cache job logs for fallback warnings before using its result.
 
+The [target plus sccache comparison](.github/workflows/zed-runs-on-sccache.yml) repeats those phases with the same source and Cargo command. BoringCache uses its Cargo target and remote sccache adapters. Magic Cache archives the target and a local sccache directory after each build. The cache snapshots have different storage formats, so compare the completed build and cache path as a whole.
+
 Run the [connection workflow](.github/workflows/connect-runs-on-s3.yml) once and approve the repository binding to `boringcache/benchmark-runs-on-s3-clean` before dispatching the comparison.
 
 The scheduled sync selects the newest source with a successful upstream

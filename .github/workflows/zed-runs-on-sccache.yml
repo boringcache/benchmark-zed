@@ -1,0 +1,119 @@
+name: Zed RunsOn target and sccache comparison
+run-name: Zed target and sccache on RunsOn
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: Optional exact BoringCache CLI release tag.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: zed-runs-on-sccache-comparison
+  cancel-in-progress: false
+
+jobs:
+  source:
+    name: Resolve adjacent Zed source
+    runs-on: ubuntu-24.04
+    outputs:
+      base_sha: ${{ steps.source.outputs.base_sha }}
+      head_sha: ${{ steps.source.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: source
+        run: |
+          set -euo pipefail
+          source cargo-layer-source.env
+          echo "base_sha=$ZED_BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$ZED_HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+  magic-cold:
+    needs: source
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: runs-on-cache
+      phase: cold
+      cache_variant: target-sccache
+      source_sha: ${{ needs.source.outputs.base_sha }}
+
+  boringcache-cold:
+    needs: source
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: boringcache
+      phase: cold
+      cache_variant: target-sccache
+      source_sha: ${{ needs.source.outputs.base_sha }}
+      cli_version: ${{ inputs.cli_version }}
+
+  magic-warm:
+    needs: [source, magic-cold]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: runs-on-cache
+      phase: warm
+      cache_variant: target-sccache
+      source_sha: ${{ needs.source.outputs.base_sha }}
+
+  boringcache-warm:
+    needs: [source, boringcache-cold]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: boringcache
+      phase: warm
+      cache_variant: target-sccache
+      source_sha: ${{ needs.source.outputs.base_sha }}
+      cli_version: ${{ inputs.cli_version }}
+
+  magic-source-change:
+    needs: [source, magic-warm]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: runs-on-cache
+      phase: source_change
+      cache_variant: target-sccache
+      source_sha: ${{ needs.source.outputs.head_sha }}
+      expected_parent: ${{ needs.source.outputs.base_sha }}
+
+  boringcache-source-change:
+    needs: [source, boringcache-warm]
+    uses: ./.github/workflows/zed-runs-on-phase.yml
+    with:
+      provider: boringcache
+      phase: source_change
+      cache_variant: target-sccache
+      source_sha: ${{ needs.source.outputs.head_sha }}
+      expected_parent: ${{ needs.source.outputs.base_sha }}
+      cli_version: ${{ inputs.cli_version }}
+
+  report:
+    name: Compare cache phases
+    needs: [magic-source-change, boringcache-source-change]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: phase-zed-runson-*
+          path: phase-evidence
+      - name: Summarize comparable work
+        run: |
+          python3 ./scripts/benchmark-report.py summarize \
+            --title "Zed target and sccache on RunsOn" \
+            --baseline-strategy runs-on-cache \
+            --no-deltas \
+            --input-dir phase-evidence \
+            --output-dir benchmark-results
+      - uses: actions/upload-artifact@v6
+        with:
+          name: zed-runson-sccache-comparison
+          path: benchmark-results/
+          if-no-files-found: error

@@ -9,6 +9,10 @@ on:
       phase:
         required: true
         type: string
+      cache_variant:
+        required: false
+        type: string
+        default: target
       source_sha:
         required: true
         type: string
@@ -54,11 +58,23 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           EXPECTED_PARENT: ${{ inputs.expected_parent }}
         run: ./scripts/prepare-zed-lane.sh "$SOURCE_SHA" "$EXPECTED_PARENT"
+      - name: Install sccache
+        if: inputs.cache_variant == 'target-sccache'
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
       - name: Select the same Cargo command and a fresh cache cohort
+        env:
+          CACHE_VARIANT: ${{ inputs.cache_variant }}
         run: |
           set -euo pipefail
-          ./scripts/activate-cargo-plan.sh target-only primary
-          sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3-clean"|' plans/target-only/primary/.boringcache.toml |
+          case "$CACHE_VARIANT" in
+            target) plan=target-only ;;
+            target-sccache) plan=combined ;;
+            *) echo "Unknown cache variant: $CACHE_VARIANT" >&2; exit 1 ;;
+          esac
+          ./scripts/activate-cargo-plan.sh "$plan" primary
+          sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3-clean"|' "plans/$plan/primary/.boringcache.toml" |
             sed "s|tag = \"|tag = \"zed-runson-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT-|g" > "$RUNNER_TEMP/zed-plan.toml"
           rm upstream/.boringcache.toml
           cp "$RUNNER_TEMP/zed-plan.toml" upstream/.boringcache.toml
@@ -76,7 +92,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             upstream/target
-          key: zed-magic-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
+            sccache-cache
+          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
           fail-on-cache-miss: true
       - name: Record cache setup time
         id: setup_timer
@@ -95,6 +112,10 @@ jobs:
       - name: Build with RunsOn Magic Cache
         if: inputs.provider == 'runs-on-cache'
         working-directory: upstream
+        env:
+          RUSTC_WRAPPER: ${{ inputs.cache_variant == 'target-sccache' && 'sccache' || '' }}
+          SCCACHE_DIR: ${{ github.workspace }}/sccache-cache
+          SCCACHE_CACHE_SIZE: 10G
         run: |
           python3 - <<'PY'
           import subprocess
@@ -103,6 +124,11 @@ jobs:
               command = tomllib.load(source)["adapters"]["cargo"]["command"]
           subprocess.run(command, check=True)
           PY
+      - name: Report Magic sccache stats
+        if: inputs.provider == 'runs-on-cache' && inputs.cache_variant == 'target-sccache'
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}/sccache-cache
+        run: sccache --show-stats
       - name: Save RunsOn Magic Cache
         if: inputs.provider == 'runs-on-cache'
         uses: actions/cache/save@v4
@@ -111,7 +137,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             upstream/target
-          key: zed-magic-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
+            sccache-cache
+          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
       - name: Verify release binary and cache reuse
         env:
           PROVIDER: ${{ inputs.provider }}
@@ -132,6 +159,7 @@ jobs:
         env:
           PROVIDER: ${{ inputs.provider }}
           PHASE: ${{ inputs.phase }}
+          LANE: ${{ inputs.cache_variant == 'target-sccache' && 'target-sccache' || 'fresh' }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           STARTED_AT: ${{ steps.timer.outputs.started_at }}
           WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
@@ -144,7 +172,7 @@ jobs:
           python3 ./scripts/benchmark-report.py phase \
             --benchmark zed-runson \
             --strategy "$PROVIDER" \
-            --lane fresh \
+            --lane "$LANE" \
             --phase "$PHASE" \
             --mode cargo \
             --restore-or-setup-seconds "$SETUP_SECONDS" \
