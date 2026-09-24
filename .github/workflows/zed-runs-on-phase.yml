@@ -59,7 +59,7 @@ jobs:
           EXPECTED_PARENT: ${{ inputs.expected_parent }}
         run: ./scripts/prepare-zed-lane.sh "$SOURCE_SHA" "$EXPECTED_PARENT"
       - name: Install sccache
-        if: inputs.cache_variant == 'target-sccache'
+        if: inputs.cache_variant != 'target'
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.17.0
@@ -71,6 +71,7 @@ jobs:
           case "$CACHE_VARIANT" in
             target) plan=target-only ;;
             target-sccache) plan=combined ;;
+            sccache-only) plan=sccache-only ;;
             *) echo "Unknown cache variant: $CACHE_VARIANT" >&2; exit 1 ;;
           esac
           ./scripts/activate-cargo-plan.sh "$plan" primary
@@ -85,13 +86,24 @@ jobs:
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
       - name: Restore RunsOn Magic Cache
         id: magic_restore
-        if: inputs.provider == 'runs-on-cache' && inputs.phase != 'cold'
+        if: inputs.provider == 'runs-on-cache' && inputs.phase != 'cold' && inputs.cache_variant != 'sccache-only'
         uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             upstream/target
+            sccache-cache
+          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
+          fail-on-cache-miss: true
+      - name: Restore RunsOn Magic compiler cache
+        id: magic_compiler_restore
+        if: inputs.provider == 'runs-on-cache' && inputs.phase != 'cold' && inputs.cache_variant == 'sccache-only'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
             sccache-cache
           key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase == 'warm' && 'cold' || 'warm' }}
           fail-on-cache-miss: true
@@ -113,7 +125,7 @@ jobs:
         if: inputs.provider == 'runs-on-cache'
         working-directory: upstream
         env:
-          RUSTC_WRAPPER: ${{ inputs.cache_variant == 'target-sccache' && 'sccache' || '' }}
+          RUSTC_WRAPPER: ${{ inputs.cache_variant != 'target' && 'sccache' || '' }}
           SCCACHE_DIR: ${{ github.workspace }}/sccache-cache
           SCCACHE_CACHE_SIZE: 10G
         run: |
@@ -125,12 +137,12 @@ jobs:
           subprocess.run(command, check=True)
           PY
       - name: Report Magic sccache stats
-        if: inputs.provider == 'runs-on-cache' && inputs.cache_variant == 'target-sccache'
+        if: inputs.provider == 'runs-on-cache' && inputs.cache_variant != 'target'
         env:
           SCCACHE_DIR: ${{ github.workspace }}/sccache-cache
         run: sccache --show-stats
       - name: Save RunsOn Magic Cache
-        if: inputs.provider == 'runs-on-cache'
+        if: inputs.provider == 'runs-on-cache' && inputs.cache_variant != 'sccache-only'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -139,11 +151,20 @@ jobs:
             upstream/target
             sccache-cache
           key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
+      - name: Save RunsOn Magic compiler cache
+        if: inputs.provider == 'runs-on-cache' && inputs.cache_variant == 'sccache-only'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sccache-cache
+          key: zed-magic-${{ inputs.cache_variant }}-r${{ github.run_id }}-a${{ github.run_attempt }}-${{ inputs.phase }}
       - name: Verify release binary and cache reuse
         env:
           PROVIDER: ${{ inputs.provider }}
           PHASE: ${{ inputs.phase }}
-          MAGIC_HIT: ${{ steps.magic_restore.outputs.cache-hit }}
+          MAGIC_HIT: ${{ inputs.cache_variant == 'sccache-only' && steps.magic_compiler_restore.outputs.cache-hit || steps.magic_restore.outputs.cache-hit }}
           BORINGCACHE_HIT: ${{ steps.boringcache.outputs.cache-hit }}
         run: |
           set -euo pipefail
@@ -159,12 +180,12 @@ jobs:
         env:
           PROVIDER: ${{ inputs.provider }}
           PHASE: ${{ inputs.phase }}
-          LANE: ${{ inputs.cache_variant == 'target-sccache' && 'target-sccache' || 'fresh' }}
+          LANE: ${{ inputs.cache_variant == 'target' && 'fresh' || inputs.cache_variant }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           STARTED_AT: ${{ steps.timer.outputs.started_at }}
           WORKFLOW_STARTED_AT: ${{ steps.workflow_timer.outputs.started_at }}
           SETUP_SECONDS: ${{ inputs.provider == 'runs-on-cache' && steps.setup_timer.outputs.seconds || '0' }}
-          CACHE_HIT: ${{ inputs.provider == 'runs-on-cache' && steps.magic_restore.outputs.cache-hit || steps.boringcache.outputs.cache-hit }}
+          CACHE_HIT: ${{ inputs.provider == 'runs-on-cache' && (inputs.cache_variant == 'sccache-only' && steps.magic_compiler_restore.outputs.cache-hit || steps.magic_restore.outputs.cache-hit) || steps.boringcache.outputs.cache-hit }}
           EVIDENCE_PATH: ${{ steps.boringcache.outputs.evidence-path }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |

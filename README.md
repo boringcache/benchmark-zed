@@ -26,6 +26,8 @@ The [RunsOn cache comparison](.github/workflows/zed-runs-on-cache.yml) builds th
 
 The [target plus sccache comparison](.github/workflows/zed-runs-on-sccache.yml) repeats those phases with the same source and Cargo command. BoringCache uses its Cargo target and remote sccache adapters. Magic Cache archives the target and a local sccache directory after each build. The cache snapshots have different storage formats, so compare the completed build and cache path as a whole.
 
+The [sccache-only comparison](.github/workflows/zed-runs-on-sccache-only.yml) uses the same build and output checks, but neither provider restores `target` on a fresh runner. Both retain Cargo registry and Git dependencies; BoringCache uses remote sccache, and Magic Cache archives a local sccache directory.
+
 Run the [connection workflow](.github/workflows/connect-runs-on-s3.yml) once and approve the repository binding to `boringcache/benchmark-runs-on-s3-clean` before dispatching the comparison.
 
 The scheduled sync selects the newest source with a successful upstream
