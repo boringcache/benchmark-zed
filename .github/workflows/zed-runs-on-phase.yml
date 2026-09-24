@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/activate-cargo-plan.sh target-only primary
-          sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3"|' plans/target-only/primary/.boringcache.toml |
+          sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3-clean"|' plans/target-only/primary/.boringcache.toml |
             sed "s|tag = \"|tag = \"zed-runson-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT-|g" > "$RUNNER_TEMP/zed-plan.toml"
           rm upstream/.boringcache.toml
           cp "$RUNNER_TEMP/zed-plan.toml" upstream/.boringcache.toml

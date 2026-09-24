@@ -19,13 +19,18 @@ apt_options=(
   -o Dir::Etc::sourceparts=-
 )
 sudo apt-get "${apt_options[@]}" update --error-on=any
-sudo apt-get "${apt_options[@]}" install -y \
+zed_packages=(
   libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
   libasound2-dev libfontconfig1-dev libfreetype6-dev \
   libglib2.0-dev libssl-dev pkg-config cmake \
   libx11-dev libx11-xcb-dev libxcb1-dev \
   libxcursor-dev libxinerama-dev libxi-dev libxrandr-dev \
   musl-tools clang curl ca-certificates
+)
+if ! sudo apt-get "${apt_options[@]}" install -y "${zed_packages[@]}"; then
+  sudo apt-get "${apt_options[@]}" update --error-on=any
+  sudo apt-get "${apt_options[@]}" install -y "${zed_packages[@]}"
+fi
 
 pinned="$(sed -n 's/^channel = "\(.*\)"$/\1/p' upstream/rust-toolchain.toml)"
 test -n "${pinned}"
