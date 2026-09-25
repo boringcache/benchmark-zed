@@ -1,5 +1,5 @@
 name: Zed RunsOn sccache-only comparison
-run-name: Zed sccache without target on RunsOn
+run-name: Zed native sccache on RunsOn (product defaults)
 
 on:
   workflow_dispatch:
@@ -16,8 +16,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: zed-runs-on-sccache-only-comparison
+  group: zed-runs-on-rolling11
   cancel-in-progress: false
+  queue: max
 
 jobs:
   source:
@@ -107,7 +108,7 @@ jobs:
       - name: Summarize comparable work
         run: |
           python3 ./scripts/benchmark-report.py summarize \
-            --title "Zed sccache without target on RunsOn" \
+            --title "Zed native sccache on RunsOn" \
             --baseline-strategy runs-on-cache \
             --no-deltas \
             --input-dir phase-evidence \

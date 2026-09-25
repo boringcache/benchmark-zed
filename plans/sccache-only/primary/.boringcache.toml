@@ -14,6 +14,9 @@ path = "target"
 [profiles.cargo-product]
 entries = ["cargo-registry", "cargo-git"]
 
+[profiles.compiler-only]
+entries = []
+
 [adapters.sccache]
 tag = "zed-cargo-layers-1181-ee3b555-r4-sccache"
 no-git = true

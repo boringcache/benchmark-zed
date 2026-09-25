@@ -1,5 +1,5 @@
 name: Zed RunsOn cache comparison
-run-name: Zed RunsOn Magic Cache vs BoringCache
+run-name: Zed target archive cold and next-commit warm (product defaults)
 
 on:
   workflow_dispatch:
@@ -16,8 +16,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: zed-runs-on-cache-comparison
+  group: zed-runs-on-rolling11
   cancel-in-progress: false
+  queue: max
 
 jobs:
   source:
@@ -41,6 +42,7 @@ jobs:
     with:
       provider: runs-on-cache
       phase: cold
+      cache_variant: target
       source_sha: ${{ needs.source.outputs.base_sha }}
 
   boringcache-cold:
@@ -49,41 +51,29 @@ jobs:
     with:
       provider: boringcache
       phase: cold
-      source_sha: ${{ needs.source.outputs.base_sha }}
-      cli_version: ${{ inputs.cli_version }}
-
-  magic-warm:
-    needs: [source, magic-cold]
-    uses: ./.github/workflows/zed-runs-on-phase.yml
-    with:
-      provider: runs-on-cache
-      phase: warm
-      source_sha: ${{ needs.source.outputs.base_sha }}
-
-  boringcache-warm:
-    needs: [source, boringcache-cold]
-    uses: ./.github/workflows/zed-runs-on-phase.yml
-    with:
-      provider: boringcache
-      phase: warm
+      cache_variant: target
       source_sha: ${{ needs.source.outputs.base_sha }}
       cli_version: ${{ inputs.cli_version }}
 
   magic-source-change:
-    needs: [source, magic-warm]
+    needs: [source, magic-cold]
     uses: ./.github/workflows/zed-runs-on-phase.yml
     with:
       provider: runs-on-cache
       phase: source_change
+      restore_phase: cold
+      cache_variant: target
       source_sha: ${{ needs.source.outputs.head_sha }}
       expected_parent: ${{ needs.source.outputs.base_sha }}
 
   boringcache-source-change:
-    needs: [source, boringcache-warm]
+    needs: [source, boringcache-cold]
     uses: ./.github/workflows/zed-runs-on-phase.yml
     with:
       provider: boringcache
       phase: source_change
+      restore_phase: cold
+      cache_variant: target
       source_sha: ${{ needs.source.outputs.head_sha }}
       expected_parent: ${{ needs.source.outputs.base_sha }}
       cli_version: ${{ inputs.cli_version }}

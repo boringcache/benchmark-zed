@@ -27,8 +27,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: zed-runs-on-rolling5
+  group: zed-runs-on-rolling11
   cancel-in-progress: false
+  queue: max
 
 jobs:
   source:
