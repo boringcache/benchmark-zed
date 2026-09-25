@@ -82,6 +82,7 @@ def parse_args() -> argparse.Namespace:
     phase.add_argument("--source-repository", default="")
     phase.add_argument("--source-sha", default="")
     phase.add_argument("--evidence")
+    phase.add_argument("--cache-evidence")
     phase.add_argument("--output-dir", default="benchmark-results")
 
     summarize = subparsers.add_parser("summarize")
@@ -378,6 +379,7 @@ def write_phase(args: argparse.Namespace) -> int:
     cache_hit = optional_bool(args.cache_hit)
     import_ready = optional_bool(args.cache_import_ready)
     evidence = load_evidence(args.evidence)
+    cache_evidence = load_evidence(args.cache_evidence)
     identity = phase_cache_identity(args, evidence)
     measured_storage = storage_sample(args, identity)
     total_seconds = args.restore_or_setup_seconds + args.build_seconds
@@ -407,6 +409,10 @@ def write_phase(args: argparse.Namespace) -> int:
             "storage_bytes": measured_storage["bytes"] if measured_storage else None,
             "storage_source": measured_storage["source"] if measured_storage else None,
             "storage_breakdown": measured_storage.get("breakdown") if measured_storage else None,
+            "target_restore_hit": cache_evidence.get("target_restore_hit") if cache_evidence else None,
+            "dependency_archive_hit": cache_evidence.get("dependency_archive_hit") if cache_evidence else None,
+            "compiler_backend": cache_evidence.get("compiler_backend") if cache_evidence else None,
+            "compiler_sessions": cache_evidence.get("compiler_sessions") if cache_evidence else None,
         },
         "source": {
             "repository": args.source_repository or None,
@@ -552,6 +558,26 @@ def cache_state(payload: dict[str, Any]) -> str:
     return "not reported"
 
 
+def compiler_counts(payload: dict[str, Any]) -> str:
+    sessions = payload.get("cache", {}).get("compiler_sessions") or []
+    if not sessions:
+        return "n/a"
+    parts = []
+    for session in sessions:
+        compiler = session.get("compiler") or {}
+        hits = compiler.get("cache_hits")
+        misses = compiler.get("cache_misses")
+        if hits is None or misses is None:
+            parts.append("unavailable")
+        elif hits + misses == 0:
+            parts.append("no cacheable lookups")
+        else:
+            errors = sum(compiler.get(key) or 0 for key in ("cache_read_errors", "cache_write_errors", "cache_timeouts"))
+            suffix = f", {errors} errors/timeouts" if errors else ""
+            parts.append(f"{hits} hits, {misses} misses{suffix}")
+    return "; ".join(parts)
+
+
 def render_markdown(title: str, lanes: dict[tuple[str, str, str, str], dict[str, Any]], phases: list[dict[str, Any]], baseline_strategy: str = BASELINE_STRATEGY, show_deltas: bool = True) -> str:
     lines = [f"## {title}", ""]
     benchmarks = sorted({payload["benchmark"] for payload in phases})
@@ -651,6 +677,21 @@ def render_benchmark(
                 )
 
         lines.append("")
+
+        if any(payload.get("cache", {}).get("compiler_sessions") is not None for payload in phases if payload["lane"] == lane):
+            lines.append("| Provider | Phase | Target restored | Dependency archive restored | Compiler cache |")
+            lines.append("| --- | --- | --- | --- | --- |")
+            for phase_name in LANE_PHASES[lane]:
+                for strategy, variant in lane_providers:
+                    payload = next((item for item in phases if item["strategy"] == strategy and (item.get("variant") or "") == variant and item["lane"] == lane and item["phase"] == phase_name), None)
+                    if payload is None:
+                        continue
+                    restored = payload["cache"].get("target_restore_hit")
+                    target_state = "yes" if restored is True else "no" if restored is False else "n/a"
+                    dependency_hit = payload["cache"].get("dependency_archive_hit")
+                    dependency_state = "yes" if dependency_hit is True else "no" if dependency_hit is False else "n/a"
+                    lines.append(f"| {provider_label(strategy, variant)} | {PHASE_LABELS[phase_name]} | {target_state} | {dependency_state} | {compiler_counts(payload)} |")
+            lines.append("")
 
         if baseline and candidate and show_deltas:
             for phase_name in LANE_PHASES[lane]:
