@@ -1,0 +1,38 @@
+workspace = "boringcache/benchmark-zed"
+
+[entries.cargo-registry]
+tag = "zed-archive-selective-registry"
+
+[entries.cargo-git]
+tag = "zed-archive-selective-git"
+
+[entries.zed-target]
+kind = "cargo-target"
+tag = "zed-archive-selective-target"
+path = "target"
+
+[profiles.cargo-product]
+entries = ["cargo-registry", "cargo-git", "zed-target"]
+
+[adapters.sccache]
+tag = "zed-archive-selective-sccache"
+no-git = true
+metadata-hints = ["benchmark=zed-cargo-layers", "layer=compiler"]
+
+[adapters.cargo]
+tag = "zed-archive-selective-cargo"
+profiles = ["cargo-product"]
+compiler-cache = "sccache"
+no-git = true
+metadata-hints = ["benchmark=zed-cargo-layers", "lane=archive-selective", "phase=remote-server"]
+command = [
+  "cargo",
+  "--config",
+  ".cargo/bundle-config.toml",
+  "build",
+  "--release",
+  "--target",
+  "x86_64-unknown-linux-musl",
+  "--package",
+  "remote_server",
+]

@@ -1,0 +1,229 @@
+name: "Zed archive selective saves"
+run-name: ${{ format('Zed archive selective | CLI {0}', inputs.cli_version || 'Action default') }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: Optional exact immutable BoringCache CLI release tag.
+        required: false
+        type: string
+        default: ""
+      base_sha:
+        description: Seed commit. Defaults to cargo-layer-source.env.
+        required: false
+        type: string
+        default: ""
+      head_sha:
+        description: Adjacent commit built by every warm lane. Defaults to cargo-layer-source.env.
+        required: false
+        type: string
+        default: ""
+      runner_label:
+        description: Optional runner label for a manual main-branch experiment.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: benchmark-zed-archive-selective
+  cancel-in-progress: false
+
+env:
+  BORINGCACHE_ARCHIVE_GRAPH_WRITES: "1"
+  BORINGCACHE_ARCHIVE_SELECTIVE_READS: "1"
+  BORINGCACHE_ARCHIVE_SELECTIVE_VERIFY: "0"
+  CARGO_INCREMENTAL: "0"
+  ZED_BUNDLE: "true"
+  CC: clang
+  CXX: clang++
+
+jobs:
+  source:
+    name: Resolve adjacent Zed source
+    runs-on: ubuntu-24.04
+    outputs:
+      base_sha: ${{ steps.source.outputs.base_sha }}
+      head_sha: ${{ steps.source.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select the reviewed source pair
+        id: source
+        env:
+          INPUT_BASE_SHA: ${{ inputs.base_sha }}
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+          source cargo-layer-source.env
+          echo "base_sha=${INPUT_BASE_SHA:-$ZED_BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${INPUT_HEAD_SHA:-$ZED_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+  cold:
+    name: "BoringCache Zed selective seed"
+    needs: source
+    if: inputs.runner_label == '' || github.ref_name == 'main'
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Prepare the seed source and release toolchain
+        run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.base_sha }}"
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
+      - name: Require an empty target
+        run: test ! -e upstream/target
+
+      - name: Start lane timing
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Select the cold primary CLI plan
+        run: ./scripts/activate-cargo-plan.sh archive-selective primary
+
+      - name: Build the primary seed through the combined Cargo plan
+        id: primary
+        uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          mode: cargo
+          trust-policy: publish
+          working-directory: upstream
+          fail-on-cache-error: true
+          diagnostics: summary
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+
+      - name: Select the cold remote-server CLI plan
+        run: ./scripts/activate-cargo-plan.sh archive-selective remote-server
+
+      - name: Build the remote server seed through the combined Cargo plan
+        id: remote
+        uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          mode: cargo
+          trust-policy: publish
+          working-directory: upstream
+          fail-on-cache-error: true
+          diagnostics: summary
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static'
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      - name: Report cold-layer evidence
+        run: |
+          echo "lane_seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/summarize-cargo-evidence.py \
+            cold-primary "${{ steps.primary.outputs.evidence-path }}" \
+            cold-remote-server "${{ steps.remote.outputs.evidence-path }}"
+
+      - name: Retain cold product evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-archive-selective-cold
+          path: |
+            ${{ steps.primary.outputs.evidence-path }}
+            ${{ steps.remote.outputs.evidence-path }}
+          if-no-files-found: error
+
+  combined:
+    name: "BoringCache Zed selective commit"
+    needs: [source, cold]
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && inputs.runner_label || 'ubuntu-24.04' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use the benchmark Python toolchain
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Prepare the adjacent source and release toolchain
+        run: ./scripts/prepare-zed-lane.sh "${{ needs.source.outputs.head_sha }}" "${{ needs.source.outputs.base_sha }}"
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
+      - name: Require an empty target
+        run: test ! -e upstream/target
+
+      - name: Start lane timing
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Select the combined primary CLI plan
+        run: ./scripts/activate-cargo-plan.sh archive-selective primary
+
+      - name: Build primary with the combined Cargo plan
+        id: primary
+        uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          mode: cargo
+          trust-policy: publish
+          working-directory: upstream
+          fail-on-cache-error: true
+          diagnostics: summary
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+
+      - name: Select the combined remote-server CLI plan
+        run: ./scripts/activate-cargo-plan.sh archive-selective remote-server
+
+      - name: Build remote server with the combined Cargo plan
+        id: remote
+        uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
+        with:
+          cli-version: ${{ inputs.cli_version }}
+          mode: cargo
+          trust-policy: publish
+          working-directory: upstream
+          fail-on-cache-error: true
+          diagnostics: summary
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib -C target-feature=+crt-static'
+          CC_x86_64_unknown_linux_musl: musl-gcc
+
+      - name: Report combined evidence
+        run: |
+          test "${{ steps.primary.outputs.cache-hit }}" = "true"
+          echo "lane_seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/summarize-cargo-evidence.py \
+            combined-primary "${{ steps.primary.outputs.evidence-path }}" \
+            combined-remote-server "${{ steps.remote.outputs.evidence-path }}"
+
+      - name: Retain combined product evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: zed-archive-selective-combined
+          path: |
+            ${{ steps.primary.outputs.evidence-path }}
+            ${{ steps.remote.outputs.evidence-path }}
+          if-no-files-found: error
+
