@@ -54,6 +54,8 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: runs-on/action@efac073ea2507ec18797de3a81704201ade11d9d # v2.3.1
+        with:
+          sccache: ${{ inputs.provider == 'runs-on-cache' && inputs.cache_variant != 'target' && 's3' || '' }}
       - uses: actions/checkout@v6
       - name: Start the workflow timer
         id: workflow_timer
@@ -71,6 +73,24 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.17.0
+      - name: Scope RunsOn direct S3 compiler cache
+        if: inputs.provider == 'runs-on-cache' && inputs.cache_variant != 'target'
+        run: |
+          set -euo pipefail
+          test -n "${SCCACHE_BUCKET:-}"
+          test -n "${SCCACHE_REGION:-}"
+          export SCCACHE_S3_KEY_PREFIX="cache/sccache/benchmark-zed/r${GITHUB_RUN_ID}-a${GITHUB_RUN_ATTEMPT}"
+          echo "SCCACHE_S3_KEY_PREFIX=$SCCACHE_S3_KEY_PREFIX" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json
+          import subprocess
+
+          stats = json.loads(subprocess.check_output(["sccache", "--show-stats", "--stats-format=json"]))
+          location = stats.get("cache_location")
+          if not isinstance(location, str) or "S3" not in location:
+              raise SystemExit(f"Expected direct S3 sccache backend, got {location!r}")
+          print("Direct S3 sccache backend is active")
+          PY
       - name: Select the same Cargo command and a fresh cache cohort
         env:
           CACHE_VARIANT: ${{ inputs.cache_variant }}
@@ -86,8 +106,7 @@ jobs:
           ./scripts/activate-cargo-plan.sh "$plan" primary
           scope="zed-runson-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
           if [[ -n "$ROLLING_STEP" ]]; then
-            test "$CACHE_VARIANT" = target
-            scope="zed-roll11-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+            scope="zed-roll-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
           fi
           sed 's|^workspace = ".*"|workspace = "boringcache/benchmark-runs-on-s3-clean"|' "plans/$plan/primary/.boringcache.toml" |
             sed "s|tag = \"|tag = \"$scope-|g" > "$RUNNER_TEMP/zed-plan.toml"
@@ -128,7 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "$ROLLING_STEP" ]]; then
-            prefix="zed-magic-roll11-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+            prefix="zed-magic-roll-r$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
             echo "restore=$prefix-step$ROLLING_PREVIOUS" >> "$GITHUB_OUTPUT"
             echo "save=$prefix-step$ROLLING_STEP" >> "$GITHUB_OUTPUT"
           else
@@ -147,7 +166,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             upstream/target
-            sccache-cache
           key: ${{ steps.magic_keys.outputs.restore }}
           fail-on-cache-miss: true
       - name: Restore RunsOn Magic compiler cache
@@ -158,12 +176,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            sccache-cache
           key: ${{ steps.magic_keys.outputs.restore }}
           fail-on-cache-miss: true
       - name: Record cache setup time
         id: setup_timer
         run: echo "seconds=$(( $(date +%s) - ${{ steps.timer.outputs.started_at }} ))" >> "$GITHUB_OUTPUT"
+      - name: Explain Cargo fingerprint invalidation
+        if: inputs.cache_variant != 'sccache-only' && inputs.phase == 'warm'
+        run: echo 'CARGO_LOG=cargo::core::compiler::fingerprint=trace' >> "$GITHUB_ENV"
       - name: Build with BoringCache
         id: boringcache
         if: inputs.provider == 'boringcache'
@@ -180,8 +200,6 @@ jobs:
         working-directory: upstream
         env:
           RUSTC_WRAPPER: ${{ inputs.cache_variant != 'target' && 'sccache' || '' }}
-          SCCACHE_DIR: ${{ github.workspace }}/sccache-cache
-          SCCACHE_CACHE_SIZE: 10G
         run: |
           python3 - <<'PY'
           import subprocess
@@ -192,9 +210,9 @@ jobs:
           PY
       - name: Report Magic sccache stats
         if: inputs.provider == 'runs-on-cache' && inputs.cache_variant != 'target'
-        env:
-          SCCACHE_DIR: ${{ github.workspace }}/sccache-cache
-        run: sccache --show-stats
+        run: |
+          mkdir -p benchmark-results
+          sccache --show-stats --stats-format=json > benchmark-results/magic-sccache.json
       - name: Save RunsOn Magic Cache
         if: inputs.provider == 'runs-on-cache' && inputs.cache_variant != 'sccache-only'
         uses: actions/cache/save@v4
@@ -203,7 +221,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             upstream/target
-            sccache-cache
           key: ${{ steps.magic_keys.outputs.save }}
       - name: Save RunsOn Magic compiler cache
         if: inputs.provider == 'runs-on-cache' && inputs.cache_variant == 'sccache-only'
@@ -212,7 +229,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            sccache-cache
           key: ${{ steps.magic_keys.outputs.save }}
       - name: Verify release binary and cache reuse
         env:
@@ -233,6 +249,7 @@ jobs:
       - name: Write phase evidence
         env:
           PROVIDER: ${{ inputs.provider }}
+          CACHE_VARIANT: ${{ inputs.cache_variant }}
           PHASE: ${{ inputs.rolling_step != '' && 'commit' || inputs.phase }}
           LANE: ${{ inputs.rolling_step != '' && 'rolling' || (inputs.cache_variant == 'target' && 'fresh' || inputs.cache_variant) }}
           VARIANT: ${{ inputs.rolling_step != '' && format('step{0}{1}', inputs.rolling_step, inputs.phase == 'warm' && '-warm' || '') || '' }}
@@ -245,6 +262,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          python3 ./scripts/collect-zed-cache-evidence.py \
+            --provider "$PROVIDER" \
+            --cache-variant "$CACHE_VARIANT" \
+            --action-evidence "$EVIDENCE_PATH" \
+            --magic-hit "$CACHE_HIT" \
+            --output benchmark-results/cache-evidence.json
           python3 ./scripts/benchmark-report.py phase \
             --benchmark zed-runson \
             --strategy "$PROVIDER" \
@@ -258,7 +281,16 @@ jobs:
             --cache-hit "$CACHE_HIT" \
             --source-repository zed-industries/zed \
             --source-sha "$SOURCE_SHA" \
-            --evidence "$EVIDENCE_PATH"
+            --evidence "$EVIDENCE_PATH" \
+            --cache-evidence benchmark-results/cache-evidence.json
+      - name: Retain BoringCache action evidence
+        if: inputs.provider == 'boringcache'
+        env:
+          EVIDENCE_PATH: ${{ steps.boringcache.outputs.evidence-path }}
+        run: |
+          set -euo pipefail
+          test -f "$EVIDENCE_PATH"
+          cp "$EVIDENCE_PATH" benchmark-results/action-evidence.json
       - uses: actions/upload-artifact@v6
         with:
           name: phase-zed-runson-${{ inputs.provider }}-${{ inputs.rolling_step != '' && format('step{0}', inputs.rolling_step) || inputs.phase }}
