@@ -359,13 +359,36 @@ class CargoLayerPlanTest(unittest.TestCase):
         self.assertNotEqual(source["ZED_BASE_SHA"], source["ZED_HEAD_SHA"])
         self.assertIn("source cargo-layer-source.env", matrix)
         self.assertNotIn("source benchmark-source.env", matrix)
-        for path in sorted((ROOT / "plans").glob("*/*/.boringcache.toml")):
+        for path in sorted(
+            path
+            for lane in LANES
+            for path in (ROOT / "plans" / lane).glob("*/.boringcache.toml")
+        ):
             plan = tomllib.loads(path.read_text())
             for entry in plan["entries"].values():
                 self.assertIn(cohort, entry["tag"])
             sccache = plan["adapters"].get("sccache")
             if sccache:
                 self.assertIn(cohort, sccache["tag"])
+
+    def test_selective_lane_preserves_recipe_and_isolates_cache_tags(self):
+        for phase in ("primary", "remote-server"):
+            baseline = tomllib.loads(
+                (ROOT / "plans" / "cold" / phase / ".boringcache.toml").read_text()
+            )
+            selective = tomllib.loads(
+                (ROOT / "plans" / "archive-selective" / phase / ".boringcache.toml").read_text()
+            )
+            self.assertEqual(
+                baseline["adapters"]["cargo"]["command"],
+                selective["adapters"]["cargo"]["command"],
+            )
+            self.assertEqual(baseline["profiles"], selective["profiles"])
+            baseline_tags = {entry["tag"] for entry in baseline["entries"].values()}
+            selective_tags = {entry["tag"] for entry in selective["entries"].values()}
+            baseline_tags.add(baseline["adapters"]["sccache"]["tag"])
+            selective_tags.add(selective["adapters"]["sccache"]["tag"])
+            self.assertFalse(baseline_tags & selective_tags)
 
     def test_release_recipe_and_layer_contract(self):
         subprocess.run(
