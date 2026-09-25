@@ -73,7 +73,7 @@ def main() -> None:
         if args.cache_variant != "target":
             stats = read_json("benchmark-results/magic-sccache.json")
             location = stats.get("cache_location")
-            if not isinstance(location, str) or "S3" not in location:
+            if not isinstance(location, str) or location.split(",", 1)[0].strip().lower() != "s3":
                 raise ValueError(f"RunsOn sccache did not select S3: {location!r}")
             sessions = [{"session": "build", "compiler": magic_compiler(stats)}]
         payload = {

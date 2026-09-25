@@ -91,7 +91,7 @@ jobs:
 
           stats = json.loads(subprocess.check_output(["sccache", "--show-stats", "--stats-format=json"]))
           location = stats.get("cache_location")
-          if not isinstance(location, str) or "S3" not in location:
+          if not isinstance(location, str) or location.split(",", 1)[0].strip().lower() != "s3":
               raise SystemExit(f"Expected direct S3 sccache backend, got {location!r}")
           print("Direct S3 sccache backend is active")
           PY
