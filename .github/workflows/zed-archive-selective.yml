@@ -208,6 +208,8 @@ jobs:
         env:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          CLI_ARTIFACT_ID: ${{ inputs.cli_artifact_id }}
+          CLI_VERSION: ${{ inputs.cli_version }}
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
         run: |
           set -euo pipefail
@@ -218,6 +220,18 @@ jobs:
           ) &
           sampler=$!
           trap 'kill "${sampler}" 2>/dev/null || true' EXIT
+          if [[ -z "${CLI_ARTIFACT_ID}" ]]; then
+            version="${CLI_VERSION:-1.33.0}"
+            version="v${version#v}"
+            install -d "${RUNNER_TEMP}/release-cli"
+            base="https://github.com/boringcache/cli/releases/download/${version}"
+            curl -fsSL --retry 5 -o "${RUNNER_TEMP}/release-cli/boringcache-linux-amd64" "${base}/boringcache-linux-amd64"
+            curl -fsSL --retry 5 -o "${RUNNER_TEMP}/release-cli/SHA256SUMS" "${base}/SHA256SUMS"
+            (cd "${RUNNER_TEMP}/release-cli" && grep ' boringcache-linux-amd64$' SHA256SUMS | sha256sum --check)
+            install -m 0755 "${RUNNER_TEMP}/release-cli/boringcache-linux-amd64" "${RUNNER_TEMP}/release-cli/boringcache"
+            export PATH="${RUNNER_TEMP}/release-cli:${PATH}"
+          fi
+          boringcache --version
           if ! boringcache cargo --workspace boringcache/benchmark-zed --port 22243 --write --fail-on-cache-error; then
             sudo dmesg | grep -iE "killed process|out of memory|oom" | tail -20 || true
             exit 1
