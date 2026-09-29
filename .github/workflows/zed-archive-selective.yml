@@ -1,5 +1,5 @@
 name: "Zed archive rolling saves"
-run-name: ${{ format('Zed archive {0} | three commits | CLI {1}', inputs.archive_format, inputs.cli_version || 'Action default') }}
+run-name: ${{ format('Zed archive {0}{2} | three commits | CLI {1}', inputs.archive_format, inputs.cli_version || 'Action default', inputs.verify && ' verified' || '') }}
 
 on:
   workflow_dispatch:
@@ -13,6 +13,10 @@ on:
         type: choice
         options: [v3, v2]
         default: v3
+      verify:
+        description: Also read every selective save in full and fail when the graphs differ.
+        type: boolean
+        default: false
       head_sha:
         description: Exact final source commit; its three first-parent predecessors form the chain.
         type: string
@@ -33,7 +37,7 @@ concurrency:
 env:
   BORINGCACHE_ARCHIVE_GRAPH_WRITES: "1"
   BORINGCACHE_ARCHIVE_SELECTIVE_READS: ${{ inputs.archive_format == 'v3' && '1' || '0' }}
-  BORINGCACHE_ARCHIVE_SELECTIVE_VERIFY: "0"
+  BORINGCACHE_ARCHIVE_SELECTIVE_VERIFY: ${{ inputs.verify && '1' || '0' }}
   CACHE_SCOPE: rolling-${{ inputs.archive_format }}-r${{ github.run_id }}-a${{ github.run_attempt }}
   CARGO_INCREMENTAL: "0"
   ZED_BUNDLE: "true"
@@ -204,6 +208,15 @@ jobs:
       - name: Verify source remained clean
         run: test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
+      - name: Keep archive phase timings
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/archive-phases"
+          cat ~/.boringcache/logs/*.jsonl 2>/dev/null \
+            | jq -c 'select(.schema == "archive_graph_phase.v1" or .schema == "system_resources.v1")' \
+            > "$RUNNER_TEMP/archive-phases/$PHASE.jsonl" || true
+          wc -l "$RUNNER_TEMP/archive-phases/$PHASE.jsonl"
+
       - name: Retain product evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -212,6 +225,7 @@ jobs:
           path: |
             ${{ steps.primary.outputs.evidence-path }}
             ${{ steps.remote.outputs.evidence-path }}
+            ${{ runner.temp }}/archive-phases/*.jsonl
           if-no-files-found: error
 
   commit1:
