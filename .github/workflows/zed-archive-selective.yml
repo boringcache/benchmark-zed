@@ -25,6 +25,10 @@ on:
         description: sccache release the selected CLI requires.
         type: string
         default: v0.17.0
+      trace_memory:
+        description: Diagnose the seed build by running the CLI directly with a memory log every 10 seconds.
+        type: boolean
+        default: false
       verify:
         description: Also read every selective save in full and fail when the graphs differ.
         type: boolean
@@ -198,8 +202,30 @@ jobs:
           BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
 
+      - name: Build the primary binaries with a memory log
+        if: inputs.trace_memory
+        working-directory: upstream
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_RESTORE_TOKEN }}
+          BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
+          RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
+        run: |
+          set -euo pipefail
+          (
+            while sleep 10; do
+              echo "[memory] $(date -u +%H:%M:%S) $(free -m | awk '/^Mem:/{printf "used=%sMB available=%sMB", $3, $7}') $(free -m | awk '/^Swap:/{printf "swap_used=%sMB", $3}') top: $(ps -eo rss=,comm= --sort=-rss | head -6 | awk '{printf "%s=%dMB ", $2, $1/1024}')"
+            done
+          ) &
+          sampler=$!
+          trap 'kill "${sampler}" 2>/dev/null || true' EXIT
+          if ! boringcache cargo --workspace boringcache/benchmark-zed --port 22243 --write --fail-on-cache-error; then
+            sudo dmesg | grep -iE "killed process|out of memory|oom" | tail -20 || true
+            exit 1
+          fi
+
       - name: Build the primary binaries through the combined Cargo plan
         id: primary
+        if: ${{ !inputs.trace_memory }}
         uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
         with:
           cli-version: ${{ inputs.cli_artifact_id != '' && 'skip' || inputs.cli_version }}
