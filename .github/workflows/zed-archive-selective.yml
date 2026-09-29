@@ -1,5 +1,5 @@
 name: "Zed archive rolling saves"
-run-name: ${{ format('Zed archive {0}{2} | three commits | CLI {1}', inputs.archive_format, inputs.cli_version || 'Action default', inputs.verify && ' verified' || '') }}
+run-name: ${{ format('Zed archive {0}{2} | three commits | CLI {1}', inputs.archive_format, inputs.cli_artifact_id || inputs.cli_version || 'Action default', inputs.verify && ' verified' || '') }}
 
 on:
   workflow_dispatch:
@@ -13,6 +13,14 @@ on:
         type: choice
         options: [v3, v2]
         default: v3
+      cli_artifact_id:
+        description: Optional immutable Linux CLI artifact to run instead of a release.
+        type: string
+        default: ""
+      cli_artifact_workspace:
+        description: Workspace that owns the optional CLI artifact.
+        type: string
+        default: boringcache/monolith
       verify:
         description: Also read every selective save in full and fail when the graphs differ.
         type: boolean
@@ -145,11 +153,35 @@ jobs:
       - name: Require clean source before caching
         run: test -z "$(git -C upstream status --porcelain=v1 --untracked-files=all)"
 
+      - name: Pull the candidate CLI artifact
+        if: inputs.cli_artifact_id != ''
+        uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
+        env:
+          BORINGCACHE_RESTORE_TOKEN: ${{ secrets.BORINGCACHE_CLI_ARTIFACT_RESTORE_TOKEN }}
+        with:
+          cli-version: v1.33.0
+          mode: artifact
+          artifact-command: pull
+          artifact-id: ${{ inputs.cli_artifact_id }}
+          artifact-workspace: ${{ inputs.cli_artifact_workspace }}
+          artifact-path: ${{ runner.temp }}/candidate-cli
+          trust-policy: restore
+
+      - name: Put the candidate CLI on PATH
+        if: inputs.cli_artifact_id != ''
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/candidate-cli"
+          sha256sum --check boringcache.sha256
+          chmod +x boringcache
+          echo "${RUNNER_TEMP}/candidate-cli" >> "$GITHUB_PATH"
+          ./boringcache --version
+
       - name: Require a published target before the commit build
         if: env.PHASE != 'seed'
         uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
         with:
-          cli-version: ${{ inputs.cli_version }}
+          cli-version: ${{ inputs.cli_artifact_id != '' && 'skip' || inputs.cli_version }}
           setup: none
           mode: cargo
           lookup-only: true
@@ -166,7 +198,7 @@ jobs:
         id: primary
         uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
         with:
-          cli-version: ${{ inputs.cli_version }}
+          cli-version: ${{ inputs.cli_artifact_id != '' && 'skip' || inputs.cli_version }}
           setup: none
           mode: cargo
           trust-policy: publish
@@ -185,7 +217,7 @@ jobs:
         id: remote
         uses: boringcache/one@f0fb9b2d926a32b10c543e92093ba00c5a291b79 # v1 / 1.33.0
         with:
-          cli-version: ${{ inputs.cli_version }}
+          cli-version: ${{ inputs.cli_artifact_id != '' && 'skip' || inputs.cli_version }}
           setup: none
           mode: cargo
           trust-policy: publish
