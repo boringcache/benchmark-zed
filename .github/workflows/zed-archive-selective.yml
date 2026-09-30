@@ -25,6 +25,10 @@ on:
         description: sccache release the selected CLI requires.
         type: string
         default: v0.17.0
+      cargo_target_budget:
+        description: Optional --target-budget for the memory-logged build; 0 turns off Cargo pruning observation.
+        type: string
+        default: ""
       trace_memory:
         description: Diagnose the seed build by running the CLI directly with a memory log every 10 seconds.
         type: boolean
@@ -210,6 +214,7 @@ jobs:
           BORINGCACHE_SAVE_TOKEN: ${{ secrets.BORINGCACHE_SAVE_TOKEN }}
           CLI_ARTIFACT_ID: ${{ inputs.cli_artifact_id }}
           CLI_VERSION: ${{ inputs.cli_version }}
+          CARGO_TARGET_BUDGET: ${{ inputs.cargo_target_budget }}
           RUSTFLAGS: '-C link-args=-Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib'
         run: |
           set -euo pipefail
@@ -232,7 +237,11 @@ jobs:
             export PATH="${RUNNER_TEMP}/release-cli:${PATH}"
           fi
           boringcache --version
-          if ! boringcache cargo --workspace boringcache/benchmark-zed --port 22243 --write --fail-on-cache-error; then
+          budget=()
+          if [[ -n "${CARGO_TARGET_BUDGET}" ]]; then
+            budget=(--target-budget "${CARGO_TARGET_BUDGET}")
+          fi
+          if ! boringcache cargo --workspace boringcache/benchmark-zed --port 22243 --write --fail-on-cache-error "${budget[@]}"; then
             sudo dmesg | grep -iE "killed process|out of memory|oom" | tail -20 || true
             exit 1
           fi
